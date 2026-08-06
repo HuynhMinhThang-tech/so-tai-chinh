@@ -323,10 +323,10 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
         ) : (
           <div style={{ width: "100%", height: 280 }}>
             <ResponsiveContainer>
-              <BarChart data={byDay}>
+              <BarChart data={byDay} margin={{ top: 8, right: 8, left: -4, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
                 <XAxis dataKey="day" tick={{ fontSize: 11, fill: T.muted }} />
-                <YAxis tick={{ fontSize: 11, fill: T.muted }} tickFormatter={(v) => (hideAmounts ? "***" : `${v / 1000000}tr`)} />
+                <YAxis width={34} tick={{ fontSize: 11, fill: T.muted }} tickFormatter={(v) => (hideAmounts ? "***" : `${v / 1000000}tr`)} />
                 <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
                 <Legend wrapperStyle={{ fontSize: 12, color: T.muted }} />
                 <Bar dataKey="thu" name="Thu nhập" fill={T.green} radius={[4, 4, 0, 0]} />
@@ -343,55 +343,57 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
           {byCategory.length === 0 ? (
             <p className="text-sm py-10 text-center" style={{ color: T.muted }}>Chưa có dữ liệu dòng tiền tháng này.</p>
           ) : (
-            <div style={{ width: "100%", height: 280 }}>
-              <ResponsiveContainer>
-                <PieChart>
-                  <Pie
-                    data={byCategory}
-                    dataKey="value"
-                    nameKey="name"
-                    startAngle={90}
-                    endAngle={-270}
-                    innerRadius={55}
-                    outerRadius={90}
-                    paddingAngle={2}
-                    label={(props) => {
-                      const { cx, cy, outerRadius: r, index } = props;
-                      const positions = buildPieLabelPositions(byCategory, cx, cy, r);
-                      const item = positions[index];
-                      if (!item) return null;
-                      const isRight = item.x >= cx;
-                      const bendX = isRight ? item.x - 10 : item.x + 10;
-                      return (
-                        <g>
-                          <polyline
-                            points={`${item.anchorX},${item.anchorY} ${bendX},${item.y} ${item.x},${item.y}`}
-                            fill="none"
-                            stroke={T.border}
-                            strokeWidth={1}
-                          />
-                          <text
-                            x={item.x + (isRight ? 4 : -4)}
-                            y={item.y}
-                            textAnchor={isRight ? "start" : "end"}
-                            dominantBaseline="central"
-                            fontSize={12}
-                            fill={T.muted}
-                          >
-                            {`${item.pct}%`}
-                          </text>
-                        </g>
-                      );
-                    }}
-                    labelLine={false}
-                  >
-                    {byCategory.map((entry, i) => (<Cell key={i} fill={entry.color} />))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value, name, props) => [`${mfmt(value, hideAmounts)} • ${props.payload.pct}%`, props.payload.name]}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+            <>
+              <div style={{ width: "100%", height: 220 }}>
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie
+                      data={byCategory}
+                      dataKey="value"
+                      nameKey="name"
+                      startAngle={90}
+                      endAngle={-270}
+                      innerRadius={55}
+                      outerRadius={80}
+                      paddingAngle={2}
+                      label={(props) => {
+                        const { cx, cy, outerRadius: r, index } = props;
+                        const positions = buildPieLabelPositions(byCategory, cx, cy, r);
+                        const item = positions[index];
+                        if (!item) return null;
+                        const isRight = item.x >= cx;
+                        const bendX = isRight ? item.x - 10 : item.x + 10;
+                        return (
+                          <g>
+                            <polyline
+                              points={`${item.anchorX},${item.anchorY} ${bendX},${item.y} ${item.x},${item.y}`}
+                              fill="none"
+                              stroke={T.border}
+                              strokeWidth={1}
+                            />
+                            <text
+                              x={item.x + (isRight ? 4 : -4)}
+                              y={item.y}
+                              textAnchor={isRight ? "start" : "end"}
+                              dominantBaseline="central"
+                              fontSize={12}
+                              fill={T.muted}
+                            >
+                              {`${item.pct}%`}
+                            </text>
+                          </g>
+                        );
+                      }}
+                      labelLine={false}
+                    >
+                      {byCategory.map((entry, i) => (<Cell key={i} fill={entry.color} />))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value, name, props) => [`${mfmt(value, hideAmounts)} • ${props.payload.pct}%`, props.payload.name]}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
               <div className={`grid gap-x-6 gap-y-2 mt-3 pt-3 ${mobile ? "grid-cols-1" : "grid-cols-2"}`} style={{ borderTop: `1px solid ${T.border}` }}>
                 {byCategory.map((c, i) => (
                   <div key={i} className="flex items-center gap-2 text-xs">
@@ -401,7 +403,7 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
                   </div>
                 ))}
               </div>
-            </div>
+            </>
           )}
         </div>
 
@@ -450,10 +452,10 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
         ) : (
           <div style={{ width: "100%", height: 280 }}>
             <ResponsiveContainer>
-              <BarChart data={budgetVsActual} margin={{ top: 24, right: 8, left: 0, bottom: 0 }}>
+              <BarChart data={budgetVsActual} margin={{ top: 10, right: 8, left: -4, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
                 <XAxis dataKey="name" tick={{ fontSize: 11, fill: T.muted }} interval={0} angle={-15} textAnchor="end" height={50} />
-                <YAxis domain={[0, budgetChartMax]} tick={{ fontSize: 11, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
+                <YAxis width={34} domain={[0, budgetChartMax]} tick={{ fontSize: 11, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
                 <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
                 <Legend wrapperStyle={{ fontSize: 12, color: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
                 <Bar dataKey="Hạn mức" fill={T.sage} radius={[4, 4, 0, 0]}>
@@ -902,13 +904,20 @@ function EntryTab({ transactions, month, categories, budgets, viewMode = "web", 
   const [newSubName, setNewSubName] = useState("");
   const [logDateFrom, setLogDateFrom] = useState("");
   const [logDateTo, setLogDateTo] = useState("");
+  const [logTypeFilter, setLogTypeFilter] = useState("all"); // "all" | "income" | "expense"
 
   const txMonth = useMemo(() => transactions.filter((t) => t.date.startsWith(month)).sort((a, b) => b.date.localeCompare(a.date)), [transactions, month]);
   const logFilterMaxDate = useMemo(() => { const end = monthEnd(month); const today = todayISO(); return end < today ? end : today; }, [month]);
   useEffect(() => { setLogDateFrom(""); setLogDateTo(""); }, [month]);
   const filteredLogTx = useMemo(
-    () => txMonth.filter((t) => (!logDateFrom || t.date >= logDateFrom) && (!logDateTo || t.date <= logDateTo)),
-    [txMonth, logDateFrom, logDateTo]
+    () =>
+      txMonth.filter(
+        (t) =>
+          (!logDateFrom || t.date >= logDateFrom) &&
+          (!logDateTo || t.date <= logDateTo) &&
+          (logTypeFilter === "all" || t.type === logTypeFilter)
+      ),
+    [txMonth, logDateFrom, logDateTo, logTypeFilter]
   );
   const txByDay = useMemo(() => {
     const groups = [];
@@ -1082,29 +1091,51 @@ function EntryTab({ transactions, month, categories, budgets, viewMode = "web", 
       </form>
 
       <div className={`rounded-2xl bg-white overflow-hidden ${mobile ? "" : "col-span-3"}`}>
-        <div className="p-4 flex items-center justify-between flex-wrap gap-2" style={{ borderBottom: `1px solid ${T.border}` }}>
-          <h3 className="text-sm font-medium" style={{ color: T.ink }}>Nhật ký {monthLabel(month)}</h3>
-          <div className="flex items-center gap-1.5 text-xs" style={{ color: T.muted }}>
-            <span>Từ</span>
-            <input
-              type="date"
-              value={logDateFrom}
-              min={`${month}-01`}
-              max={logDateTo || logFilterMaxDate}
-              onChange={(e) => setLogDateFrom(e.target.value > logFilterMaxDate ? logFilterMaxDate : e.target.value)}
-              className="rounded-lg border px-2 py-1 text-xs focus:outline-none"
-              style={{ borderColor: T.border, color: T.ink, background: T.card }}
-            />
-            <span>đến</span>
-            <input
-              type="date"
-              value={logDateTo}
-              min={logDateFrom || `${month}-01`}
-              max={logFilterMaxDate}
-              onChange={(e) => setLogDateTo(e.target.value > logFilterMaxDate ? logFilterMaxDate : e.target.value)}
-              className="rounded-lg border px-2 py-1 text-xs focus:outline-none"
-              style={{ borderColor: T.border, color: T.ink, background: T.card }}
-            />
+        <div className="p-4" style={{ borderBottom: `1px solid ${T.border}` }}>
+          <h3 className="text-sm font-medium mb-3" style={{ color: T.ink }}>Nhật ký {monthLabel(month)}</h3>
+          <div className={`flex gap-2 ${mobile ? "flex-col" : "items-center justify-between flex-wrap"}`}>
+            <div className={`inline-flex rounded-full p-0.5 gap-0.5 ${mobile ? "w-full" : ""}`} style={{ background: "#E4E7DC" }}>
+              {[
+                { key: "all", label: "Tất cả" },
+                { key: "income", label: "Thu nhập" },
+                { key: "expense", label: "Chi tiêu" },
+              ].map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setLogTypeFilter(opt.key)}
+                  className={`text-xs font-semibold px-2.5 py-1.5 rounded-full whitespace-nowrap ${mobile ? "flex-1" : ""}`}
+                  style={{
+                    border: "none", cursor: "pointer",
+                    background: logTypeFilter === opt.key ? T.ink : "transparent",
+                    color: logTypeFilter === opt.key ? "#fff" : T.muted,
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <div className={`flex items-center gap-1.5 text-xs ${mobile ? "w-full" : ""}`} style={{ color: T.muted }}>
+              <span className="shrink-0">Từ</span>
+              <input
+                type="date"
+                value={logDateFrom}
+                min={`${month}-01`}
+                max={logDateTo || logFilterMaxDate}
+                onChange={(e) => setLogDateFrom(e.target.value > logFilterMaxDate ? logFilterMaxDate : e.target.value)}
+                className={`rounded-lg border px-2 py-1 text-xs focus:outline-none ${mobile ? "flex-1 min-w-0" : ""}`}
+                style={{ borderColor: T.border, color: T.ink, background: T.card }}
+              />
+              <span className="shrink-0">đến</span>
+              <input
+                type="date"
+                value={logDateTo}
+                min={logDateFrom || `${month}-01`}
+                max={logFilterMaxDate}
+                onChange={(e) => setLogDateTo(e.target.value > logFilterMaxDate ? logFilterMaxDate : e.target.value)}
+                className={`rounded-lg border px-2 py-1 text-xs focus:outline-none ${mobile ? "flex-1 min-w-0" : ""}`}
+                style={{ borderColor: T.border, color: T.ink, background: T.card }}
+              />
+            </div>
           </div>
         </div>
         {viewMode === "app" ? (
@@ -1400,7 +1431,9 @@ export default function App() {
             <div className="flex items-center justify-between mt-3 gap-2">
               <MonthPicker value={month} onChange={setMonth} className="text-xs px-2 py-1" />
               <div className="flex items-center gap-2">
-                <span className="ff-mono" style={{ fontSize: 11, color: T.muted }}>{txCountThisMonth} khoản</span>
+                {tab !== "overview" && (
+                  <span className="ff-mono" style={{ fontSize: 11, color: T.muted }}>{txCountThisMonth} khoản</span>
+                )}
                 <AmountVisibilityToggle hidden={hideAmounts} onChange={setHideAmounts} />
               </div>
             </div>
