@@ -242,6 +242,18 @@ function AmountVisibilityToggle({ hidden, onChange, full = false }) {
 // ---------- Tab 1: Overview ----------
 function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "web" }) {
   const mobile = viewMode === "app";
+  // Kích thước chữ / góc nghiêng trục biểu đồ co giãn theo giao diện đang xem: ở "app"
+  // (màn hình hẹp) chữ cần nhỏ hơn và nhãn trục X cần nghiêng nhiều hơn để không bị chật/đè chữ.
+  const chartUI = {
+    axisFont: mobile ? 9 : 11,
+    legendFont: mobile ? 10 : 12,
+    labelFont: mobile ? 9 : 11,
+    pctFont: mobile ? 10 : 12,
+    xAngle: mobile ? -40 : -15,
+    xHeight: mobile ? 68 : 50,
+    chartHeight: mobile ? 240 : 280,
+    pieHeight: mobile ? 200 : 220,
+  };
   const txMonth = useMemo(() => transactions.filter((t) => t.date.startsWith(month)), [transactions, month]);
   const totalIncome = txMonth.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const totalExpense = txMonth.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
@@ -253,11 +265,14 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
   // (không phải số đã chi thực tế), cộng thêm "Chưa phân bổ" (thu nhập chưa được gán vào ngân sách nào).
   const byCategory = useMemo(() => {
     const budgetedCats = mb.categories || {};
-    const denom = totalIncome;
+    const totalBudgeted = Object.values(budgetedCats).reduce((s, v) => s + v, 0);
+    // Nếu ngân sách đã lập vượt quá thu nhập (ví dụ lập trước ngân sách cho tháng chưa có thu nhập,
+    // hoặc thu nhập tháng này thấp hơn dự kiến), lấy TỔNG NGÂN SÁCH làm mẫu số để chia tỷ lệ %,
+    // để các lát cắt luôn cộng lại đúng 100%. Ngược lại (thu nhập >= ngân sách) vẫn lấy thu nhập làm mẫu số như cũ.
+    const denom = totalBudgeted > totalIncome ? totalBudgeted : totalIncome;
     const list = Object.entries(budgetedCats).map(([name, value], i) => ({
       name, value, color: colorFor(name, i), pct: denom ? Math.round((value / denom) * 100) : 0,
     }));
-    const totalBudgeted = Object.values(budgetedCats).reduce((s, v) => s + v, 0);
     const unallocated = totalIncome - totalBudgeted;
     if (unallocated > 0) {
       list.push({ name: "Chưa phân bổ", value: unallocated, color: "#C9C4AE", pct: denom ? Math.round((unallocated / denom) * 100) : 0 });
@@ -311,7 +326,7 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
     <div className="space-y-5">
       <div className={`grid gap-3 ${mobile ? "grid-cols-1" : "grid-cols-4"}`}>
         <KpiCard icon={TrendingUp} label="Tổng thu nhập tháng" value={mfmt(totalIncome, hideAmounts)} accent={T.green} />
-        <KpiCard icon={PiggyBank} label="Chưa phân bổ" value={mfmt(Math.abs(unallocatedBudget), hideAmounts)} accent={unallocatedBudget < 0 ? T.rust : T.olive} />
+        <KpiCard icon={PiggyBank} label={unallocatedBudget < 0 ? "Ngân sách vượt thu nhập" : "Chưa phân bổ"} value={mfmt(Math.abs(unallocatedBudget), hideAmounts)} accent={unallocatedBudget < 0 ? T.rust : T.olive} />
         <KpiCard icon={TrendingDown} label="Tổng chi tiêu" value={mfmt(totalExpense, hideAmounts)} accent={T.rust} />
         <KpiCard icon={Wallet} label="Số dư" value={mfmt(balance, hideAmounts)} accent={balance >= 0 ? T.green : T.rust} />
       </div>
@@ -321,14 +336,14 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
         {byDay.length === 0 ? (
           <p className="text-sm py-10 text-center" style={{ color: T.muted }}>Chưa có dữ liệu tháng này.</p>
         ) : (
-          <div style={{ width: "100%", height: 280 }}>
+          <div style={{ width: "100%", height: chartUI.chartHeight }}>
             <ResponsiveContainer>
               <BarChart data={byDay} margin={{ top: 8, right: 8, left: -4, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
-                <XAxis dataKey="day" tick={{ fontSize: 11, fill: T.muted }} />
-                <YAxis width={34} tick={{ fontSize: 11, fill: T.muted }} tickFormatter={(v) => (hideAmounts ? "***" : `${v / 1000000}tr`)} />
+                <XAxis dataKey="day" tick={{ fontSize: chartUI.axisFont, fill: T.muted }} />
+                <YAxis width={34} tick={{ fontSize: chartUI.axisFont, fill: T.muted }} tickFormatter={(v) => (hideAmounts ? "***" : `${v / 1000000}tr`)} />
                 <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
-                <Legend wrapperStyle={{ fontSize: 12, color: T.muted }} />
+                <Legend wrapperStyle={{ fontSize: chartUI.legendFont, color: T.muted }} />
                 <Bar dataKey="thu" name="Thu nhập" fill={T.green} radius={[4, 4, 0, 0]} />
                 <Bar dataKey="chi" name="Chi tiêu" fill={T.olive} radius={[4, 4, 0, 0]} />
               </BarChart>
@@ -339,12 +354,24 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
 
       <div className={`grid gap-4 ${mobile ? "grid-cols-1" : "grid-cols-2"}`}>
         <div className="rounded-2xl bg-white p-4">
-          <h3 className="text-sm font-medium mb-2" style={{ color: T.ink }}>Phân bổ dòng tiền ra theo danh mục</h3>
+          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+            <h3 className="text-sm font-medium" style={{ color: T.ink }}>Phân bổ dòng tiền ra theo danh mục</h3>
+            <span
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full"
+              style={{
+                color: unallocatedBudget < 0 ? T.rust : T.green,
+                background: unallocatedBudget < 0 ? T.rustSoft : T.greenSoft,
+              }}
+            >
+              {unallocatedBudget < 0 ? "Ngân sách vượt thu nhập" : "Chưa phân bổ"}:
+              <span className="font-semibold">{mfmt(Math.abs(unallocatedBudget), hideAmounts)}</span>
+            </span>
+          </div>
           {byCategory.length === 0 ? (
             <p className="text-sm py-10 text-center" style={{ color: T.muted }}>Chưa có dữ liệu dòng tiền tháng này.</p>
           ) : (
             <>
-              <div style={{ width: "100%", height: 220 }}>
+              <div style={{ width: "100%", height: chartUI.pieHeight }}>
                 <ResponsiveContainer>
                   <PieChart>
                     <Pie
@@ -376,7 +403,7 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
                               y={item.y}
                               textAnchor={isRight ? "start" : "end"}
                               dominantBaseline="central"
-                              fontSize={12}
+                              fontSize={chartUI.pctFont}
                               fill={T.muted}
                             >
                               {`${item.pct}%`}
@@ -450,19 +477,19 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
         {budgetVsActual.length === 0 ? (
           <p className="text-sm py-10 text-center" style={{ color: T.muted }}>Chưa đặt hạn mức ngân sách cho danh mục nào trong tháng này.</p>
         ) : (
-          <div style={{ width: "100%", height: 280 }}>
+          <div style={{ width: "100%", height: chartUI.chartHeight }}>
             <ResponsiveContainer>
               <BarChart data={budgetVsActual} margin={{ top: 10, right: 8, left: -4, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: T.muted }} interval={0} angle={-15} textAnchor="end" height={50} />
-                <YAxis width={34} domain={[0, budgetChartMax]} tick={{ fontSize: 11, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
+                <XAxis dataKey="name" tick={{ fontSize: chartUI.axisFont, fill: T.muted }} interval={0} angle={chartUI.xAngle} textAnchor="end" height={chartUI.xHeight} />
+                <YAxis width={34} domain={[0, budgetChartMax]} tick={{ fontSize: chartUI.axisFont, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
                 <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
-                <Legend wrapperStyle={{ fontSize: 12, color: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
+                <Legend wrapperStyle={{ fontSize: chartUI.legendFont, color: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
                 <Bar dataKey="Hạn mức" fill={T.sage} radius={[4, 4, 0, 0]}>
-                  <LabelList dataKey="Hạn mức" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: 11, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
+                  <LabelList dataKey="Hạn mức" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
                 </Bar>
                 <Bar dataKey="Đã chi" fill={T.rust} radius={[4, 4, 0, 0]}>
-                  <LabelList dataKey="Đã chi" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: 11, fill: T.rust, fontFamily: "'Inter', system-ui, sans-serif" }} />
+                  <LabelList dataKey="Đã chi" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: T.rust, fontFamily: "'Inter', system-ui, sans-serif" }} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -739,7 +766,9 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, onAd
   // không còn là con số đặt tay tách biệt — toàn bộ thu nhập là "chiếc bánh" cần phân bổ.
   const totalCatBudget = useMemo(() => Object.values(mb.categories).reduce((s, v) => s + v, 0), [mb]);
   const unallocatedNow = totalIncome - totalCatBudget;
-  const pctAllocated = totalIncome > 0 ? Math.min(100, Math.round((totalCatBudget / totalIncome) * 100)) : 0;
+  const pctAllocated = totalIncome > 0
+    ? Math.min(100, Math.round((totalCatBudget / totalIncome) * 100))
+    : (totalCatBudget > 0 ? 100 : 0);
 
   // ---- category (lv1) budgets ----
   const [catForm, setCatForm] = useState({ category: "", amount: "" });
@@ -783,27 +812,28 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, onAd
           <MonthPicker value={budgetMonth} onChange={setBudgetMonth} className="text-xs px-2 py-1" />
         </div>
 
-        {totalIncome <= 0 ? (
-          <p className="text-sm" style={{ color: T.muted }}>Chưa có thu nhập nào được ghi nhận cho tháng này để lập ngân sách.</p>
-        ) : (
-          <div>
-            <div className="flex items-baseline justify-between flex-wrap gap-2 mb-2">
-              <div>
-                <p className="text-xs" style={{ color: T.muted }}>Đã lập ngân sách</p>
-                <p className="text-lg font-semibold ff-serif" style={{ color: T.ink }}>{mfmt(totalCatBudget, hideAmounts)}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-xs" style={{ color: T.muted }}>{unallocatedNow < 0 ? "Vượt thu nhập" : "Chưa phân bổ"}</p>
-                <p className="text-lg font-semibold ff-serif" style={{ color: unallocatedNow < 0 ? T.rust : T.ink }}>{mfmt(Math.abs(unallocatedNow), hideAmounts)}</p>
-              </div>
+        <div>
+          {totalIncome <= 0 && (
+            <p className="text-xs mb-3" style={{ color: T.muted }}>
+              Chưa có thu nhập nào được ghi nhận cho tháng này — bạn vẫn có thể lập hạn mức ngân sách và ghi chép chi tiêu bình thường, phần dưới sẽ hiển thị là "Ngân sách vượt thu nhập" cho đến khi có thu nhập được ghi nhận.
+            </p>
+          )}
+          <div className="flex items-baseline justify-between flex-wrap gap-2 mb-2">
+            <div>
+              <p className="text-xs" style={{ color: T.muted }}>Đã lập ngân sách</p>
+              <p className="text-lg font-semibold ff-serif" style={{ color: T.ink }}>{mfmt(totalCatBudget, hideAmounts)}</p>
             </div>
-            <div className="h-3 rounded-full overflow-hidden flex" style={{ background: T.page }}>
-              <div className="h-full" style={{ width: `${pctAllocated}%`, background: unallocatedNow < 0 ? T.rust : T.green }} />
-              {unallocatedNow >= 0 && <div className="h-full" style={{ width: `${100 - pctAllocated}%`, background: T.border }} />}
+            <div className="text-right">
+              <p className="text-xs" style={{ color: T.muted }}>{unallocatedNow < 0 ? "Vượt thu nhập" : "Chưa phân bổ"}</p>
+              <p className="text-lg font-semibold ff-serif" style={{ color: unallocatedNow < 0 ? T.rust : T.ink }}>{mfmt(Math.abs(unallocatedNow), hideAmounts)}</p>
             </div>
-            <p className="text-xs mt-1.5" style={{ color: T.muted }}>Tổng thu nhập tháng này: {mfmt(totalIncome, hideAmounts)}</p>
           </div>
-        )}
+          <div className="h-3 rounded-full overflow-hidden flex" style={{ background: T.page }}>
+            <div className="h-full" style={{ width: `${pctAllocated}%`, background: unallocatedNow < 0 ? T.rust : T.green }} />
+            {unallocatedNow >= 0 && <div className="h-full" style={{ width: `${100 - pctAllocated}%`, background: T.border }} />}
+          </div>
+          <p className="text-xs mt-1.5" style={{ color: T.muted }}>Tổng thu nhập tháng này: {mfmt(totalIncome, hideAmounts)}</p>
+        </div>
       </div>
 
       <div className="rounded-2xl bg-white p-5">
