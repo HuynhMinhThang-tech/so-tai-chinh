@@ -37,6 +37,13 @@ const FontImport = () => (
     .ff-mono { font-family: 'IBM Plex Mono', monospace; }
     .rounded-2xl.bg-white { box-shadow: 0 1px 2px rgba(32,38,31,0.06); border-radius: 10px !important; }
     .rounded-xl { border-radius: 8px !important; }
+    /* ---- PWA trên iPhone: khi mở từ màn hình chính (standalone), chặn hiệu ứng
+       cuộn nẩy (rubber-banding) làm lộ khoảng trắng phía sau, và chặn zoom 2 ngón tay ngoài ý muốn ---- */
+    html, body {
+      height: 100%;
+      overscroll-behavior: none;
+      touch-action: pan-x pan-y;
+    }
   `}</style>
 );
 
@@ -102,6 +109,15 @@ function detectDevice() {
   const isMobileUA = /Android|iPhone|iPad|iPod|Mobile|IEMobile/i.test(ua);
   const isNarrow = window.innerWidth < 820;
   return isMobileUA || isNarrow ? "app" : "web";
+}
+
+// Phân biệt "điện thoại thật" (kể cả khi cài PWA lẫn khi mở tab Safari bình thường trên máy) với
+// việc chỉ đang bấm nút chuyển "App" để xem thử giao diện mobile trên trình duyệt máy tính.
+// Trên điện thoại thật thì hiển thị full màn hình, không cần khung mockup điện thoại giả nữa.
+function isRealMobileDevice() {
+  if (typeof window === "undefined") return false;
+  const ua = window.navigator?.userAgent || "";
+  return /Android|iPhone|iPad|iPod|Mobile|IEMobile/i.test(ua);
 }
 
 const THIS_MONTH = currentMonth();
@@ -1438,8 +1454,69 @@ export default function App() {
     </>
   );
 
-  // ---------- Khung mobile: bezel điện thoại, giống hệt app "Việc Của Tôi" ----------
+  // ---------- Khung mobile ----------
+  // Trên điện thoại thật (kể cả PWA standalone lẫn tab Safari), hiển thị TRÀN MÀN HÌNH,
+  // không còn khung/viền/bóng đổ giả lập điện thoại — vì bản thân màn hình đã là điện thoại rồi.
+  // Khung mockup (viền đen bo tròn) chỉ giữ lại khi xem thử "App" trên trình duyệt máy tính, cho dễ hình dung.
   if (viewMode !== "web") {
+    const realDevice = isRealMobileDevice();
+
+    const header = (
+      <div style={{ padding: realDevice ? "calc(env(safe-area-inset-top, 0px) + 12px) 16px 10px" : "16px 16px 10px" }}>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="ff-serif" style={{ fontWeight: 700, fontSize: 17, color: T.ink }}>Sổ Tài Chính</div>
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>{currentTabLabel}</div>
+          </div>
+          <IconViewToggle value={viewMode} onChange={handleViewChange} />
+        </div>
+        <div className="flex items-center justify-between mt-3 gap-2">
+          <MonthPicker value={month} onChange={setMonth} className="text-xs px-2 py-1" />
+          <div className="flex items-center gap-2">
+            {tab !== "overview" && (
+              <span className="ff-mono" style={{ fontSize: 11, color: T.muted }}>{txCountThisMonth} khoản</span>
+            )}
+            <AmountVisibilityToggle hidden={hideAmounts} onChange={setHideAmounts} />
+          </div>
+        </div>
+      </div>
+    );
+
+    const bottomNav = (
+      <div style={{ display: "flex", borderTop: `1px solid ${T.border}`, background: T.card, padding: realDevice ? "8px 6px calc(env(safe-area-inset-bottom, 0px) + 8px)" : "8px 6px", gap: 4 }}>
+        {tabs.map((t) => {
+          const Icon = t.icon;
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              style={{
+                flex: 1, border: "none", background: "transparent", cursor: "pointer",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "6px 0",
+                color: active ? T.green : T.muted,
+              }}
+            >
+              <Icon size={18} strokeWidth={2.3} />
+              <span className="ff-sans" style={{ fontSize: 10, fontWeight: 600 }}>{t.shortLabel || t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+
+    if (realDevice) {
+      return (
+        <div className="ff-sans" style={{ height: "100dvh", background: T.page, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <FontImport />
+          {header}
+          <div style={{ flex: 1, overflowY: "auto", padding: "6px 16px 16px" }}>{content}</div>
+          {bottomNav}
+        </div>
+      );
+    }
+
+    // ---- Preview trên desktop: giữ khung bezel điện thoại giả lập, giống hệt app "Việc Của Tôi" ----
     return (
       <div className="ff-sans" style={{ minHeight: "100vh", background: T.page, display: "flex", justifyContent: "center", padding: "24px 12px" }}>
         <FontImport />
@@ -1450,47 +1527,9 @@ export default function App() {
             overflow: "hidden", display: "flex", flexDirection: "column",
           }}
         >
-          <div style={{ padding: "16px 16px 10px" }}>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="ff-serif" style={{ fontWeight: 700, fontSize: 17, color: T.ink }}>Sổ Tài Chính</div>
-                <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>{currentTabLabel}</div>
-              </div>
-              <IconViewToggle value={viewMode} onChange={handleViewChange} />
-            </div>
-            <div className="flex items-center justify-between mt-3 gap-2">
-              <MonthPicker value={month} onChange={setMonth} className="text-xs px-2 py-1" />
-              <div className="flex items-center gap-2">
-                {tab !== "overview" && (
-                  <span className="ff-mono" style={{ fontSize: 11, color: T.muted }}>{txCountThisMonth} khoản</span>
-                )}
-                <AmountVisibilityToggle hidden={hideAmounts} onChange={setHideAmounts} />
-              </div>
-            </div>
-          </div>
-
+          {header}
           <div style={{ height: 560, overflowY: "auto", padding: "6px 16px 16px" }}>{content}</div>
-
-          <div style={{ display: "flex", borderTop: `1px solid ${T.border}`, background: T.card, padding: "8px 6px", gap: 4 }}>
-            {tabs.map((t) => {
-              const Icon = t.icon;
-              const active = tab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setTab(t.id)}
-                  style={{
-                    flex: 1, border: "none", background: "transparent", cursor: "pointer",
-                    display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "6px 0",
-                    color: active ? T.green : T.muted,
-                  }}
-                >
-                  <Icon size={18} strokeWidth={2.3} />
-                  <span className="ff-sans" style={{ fontSize: 10, fontWeight: 600 }}>{t.shortLabel || t.label}</span>
-                </button>
-              );
-            })}
-          </div>
+          {bottomNav}
         </div>
       </div>
     );
