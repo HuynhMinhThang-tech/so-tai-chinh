@@ -558,18 +558,33 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
 
   const expenseByCat = useMemo(() => {
     const map = {};
+    // Khởi tạo từ TẤT CẢ danh mục đã lập ngân sách cho tháng này (kể cả khi chưa chi đồng nào) —
+    // để "Dòng tiền ra" luôn phản ánh đầy đủ kế hoạch ngân sách, không chỉ những gì đã thực chi.
+    // Danh mục chưa chi gì sẽ hiện với "còn lại" = đúng bằng hạn mức đã đặt.
+    Object.keys(mb.categories).forEach((name) => {
+      map[name] = { name, value: 0, items: [] };
+    });
     txMonth.filter((t) => t.type === "expense").forEach((t) => {
       if (!map[t.category]) map[t.category] = { name: t.category, value: 0, items: [] };
       map[t.category].value += t.amount;
       map[t.category].items.push(t);
     });
     Object.values(map).forEach((c) => c.items.sort((a, b) => a.date.localeCompare(b.date)));
-    const list = Object.values(map).sort((a, b) => b.value - a.value);
+    // Sắp xếp theo hạn mức ngân sách giảm dần trước (ổn định kể cả với danh mục chưa phát sinh chi
+    // tiêu nào), rồi mới tới số đã chi cho các danh mục không có ngân sách (phát sinh ngoài kế hoạch).
+    const list = Object.values(map).sort((a, b) => {
+      const budgetA = mb.categories[a.name];
+      const budgetB = mb.categories[b.name];
+      if (budgetA != null && budgetB != null) return budgetB - budgetA;
+      if (budgetA != null) return -1;
+      if (budgetB != null) return 1;
+      return b.value - a.value;
+    });
     // Dòng tiền ra luôn phải bằng dòng tiền vào: phần thu nhập chưa chi tiêu (hoặc chi vượt thu nhập)
     // luôn xuất hiện như một danh mục lv1, và tự động co lại khi bạn ghi thêm chi tiêu.
     list.push({ name: "Chưa phân bổ", value: unallocated, items: [], isUnallocated: true });
     return list;
-  }, [txMonth, unallocated]);
+  }, [txMonth, unallocated, mb]);
 
   const [expanded, setExpanded] = useState(() => new Set());
   const toggle = (name) => setExpanded((prev) => { const next = new Set(prev); next.has(name) ? next.delete(name) : next.add(name); return next; });
@@ -636,12 +651,16 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
                     </button>
                     {isOpen && (
                       <div className="px-3 pb-2.5 space-y-1.5" style={{ borderTop: `1px solid ${T.border}` }}>
-                        {c.items.map((it) => (
-                          <div key={it.id} className="flex items-center justify-between text-xs pt-1.5">
-                            <span style={{ color: T.muted }}>Ngày {it.date.slice(8, 10)} · {it.subcategory || "—"}</span>
-                            <span style={{ color: T.ink }}>{mfmt(it.amount, hideAmounts)}</span>
-                          </div>
-                        ))}
+                        {c.items.length === 0 ? (
+                          <p className="text-xs pt-1.5" style={{ color: T.muted }}>Chưa có khoản chi nào trong danh mục này.</p>
+                        ) : (
+                          c.items.map((it) => (
+                            <div key={it.id} className="flex items-center justify-between text-xs pt-1.5">
+                              <span style={{ color: T.muted }}>Ngày {it.date.slice(8, 10)} · {it.subcategory || "—"}</span>
+                              <span style={{ color: T.ink }}>{mfmt(it.amount, hideAmounts)}</span>
+                            </div>
+                          ))
+                        )}
                       </div>
                     )}
                   </div>
@@ -736,16 +755,20 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
 
                       {isOpen && (
                         <div className="mt-3 pl-5 border-l-2 text-left" style={{ borderColor: T.border }}>
-                          {c.items.map((it) => (
-                            <div key={it.id} className="relative pl-5 pt-2 first:pt-0">
-                              <span className="absolute left-[-1px] top-5 w-5 h-px" style={{ background: T.border }} />
-                              <NodeBox className="w-full max-w-xs" style={{ background: T.page }}>
-                                <p className="text-[11px]" style={{ color: T.muted }}>Ngày {it.date.slice(8, 10)}</p>
-                                <p className="text-xs font-medium truncate" style={{ color: T.ink }}>{it.subcategory || "—"}</p>
-                                <p className="text-xs" style={{ color: T.muted }}>{mfmt(it.amount, hideAmounts)}</p>
-                              </NodeBox>
-                            </div>
-                          ))}
+                          {c.items.length === 0 ? (
+                            <p className="text-xs" style={{ color: T.muted }}>Chưa có khoản chi nào trong danh mục này.</p>
+                          ) : (
+                            c.items.map((it) => (
+                              <div key={it.id} className="relative pl-5 pt-2 first:pt-0">
+                                <span className="absolute left-[-1px] top-5 w-5 h-px" style={{ background: T.border }} />
+                                <NodeBox className="w-full max-w-xs" style={{ background: T.page }}>
+                                  <p className="text-[11px]" style={{ color: T.muted }}>Ngày {it.date.slice(8, 10)}</p>
+                                  <p className="text-xs font-medium truncate" style={{ color: T.ink }}>{it.subcategory || "—"}</p>
+                                  <p className="text-xs" style={{ color: T.muted }}>{mfmt(it.amount, hideAmounts)}</p>
+                                </NodeBox>
+                              </div>
+                            ))
+                          )}
                         </div>
                       )}
                     </li>
@@ -812,6 +835,11 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
   const submitCatBudget = async (e) => {
     e.preventDefault();
     if (!catForm.category || !catForm.amount) return;
+    // Nếu đang sửa và người dùng đã đổi sang danh mục khác, xoá ngân sách cũ (theo tên cũ)
+    // trước khi lưu ngân sách mới dưới tên danh mục vừa chọn — tránh để lại 2 dòng ngân sách.
+    if (editingCat && editingCat !== catForm.category) {
+      await onDeleteBudget(budgetMonth, editingCat);
+    }
     await onUpsertBudget(budgetMonth, catForm.category, Number(catForm.amount));
     setCatForm({ category: "", amount: "" });
     setEditingCat(null);
@@ -862,7 +890,7 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
           <div className={mobile ? "w-full" : "flex-1 min-w-[160px]"}>
             <label className="text-xs mb-1 block" style={{ color: T.muted }}>Danh mục</label>
             {!addingNewCat ? (
-              <select value={catForm.category} disabled={!!editingCat}
+              <select value={catForm.category}
                 onChange={(e) => {
                   if (e.target.value === NEW_OPTION) { setAddingNewCat(true); return; }
                   setCatForm((f) => ({ ...f, category: e.target.value }));
@@ -870,7 +898,7 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
                 className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none disabled:opacity-60" style={inputStyle}>
                 <option value="">— Chọn danh mục —</option>
                 {availableCats.map((n) => (<option key={n} value={n}>{n}</option>))}
-                {!editingCat && <option value={NEW_OPTION}>+ Thêm danh mục mới</option>}
+                <option value={NEW_OPTION}>+ Thêm danh mục mới</option>
               </select>
             ) : (
               <div className="flex gap-2">
