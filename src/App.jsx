@@ -41,6 +41,8 @@ const FontImport = () => (
        cuộn nẩy (rubber-banding) làm lộ khoảng trắng phía sau, và chặn zoom 2 ngón tay ngoài ý muốn ---- */
     html, body {
       height: 100%;
+      margin: 0;
+      background: ${T.card};
       overscroll-behavior: none;
       touch-action: pan-x pan-y;
     }
@@ -759,7 +761,8 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
 }
 
 // ---------- Tab: Budget (lập ngân sách) ----------
-function BudgetTab({ budgets, month, categories, transactions, hideAmounts, onAddExpenseCategory, onUpsertBudget, onDeleteBudget }) {
+function BudgetTab({ budgets, month, categories, transactions, hideAmounts, viewMode = "web", onAddExpenseCategory, onUpsertBudget, onDeleteBudget }) {
+  const mobile = viewMode === "app";
   // Tab này có bộ chọn tháng RIÊNG, tách biệt với bộ lọc tháng chung của toàn app,
   // để có thể lập ngân sách trước cho tháng sau mà không ảnh hưởng tháng đang xem ở các tab khác.
   const [budgetMonth, setBudgetMonth] = useState(month);
@@ -855,8 +858,8 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, onAd
       <div className="rounded-2xl bg-white p-5">
         <h3 className="text-sm font-medium mb-3" style={{ color: T.ink }}>Ngân sách theo danh mục — {monthLabel(budgetMonth)}</h3>
 
-        <form onSubmit={submitCatBudget} className="flex flex-wrap gap-2 mb-5 items-end">
-          <div className="flex-1 min-w-[160px]">
+        <form onSubmit={submitCatBudget} className={mobile ? "grid grid-cols-1 gap-3 mb-5" : "flex flex-wrap gap-2 mb-5 items-end"}>
+          <div className={mobile ? "w-full" : "flex-1 min-w-[160px]"}>
             <label className="text-xs mb-1 block" style={{ color: T.muted }}>Danh mục</label>
             {!addingNewCat ? (
               <select value={catForm.category} disabled={!!editingCat}
@@ -880,7 +883,7 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, onAd
               </div>
             )}
           </div>
-          <div className="w-40">
+          <div className={mobile ? "w-full" : "w-40"}>
             <label className="text-xs mb-1 block" style={{ color: T.muted }}>Hạn mức</label>
             <div className="relative">
               <input type="text" inputMode="numeric" value={formatAmount(catForm.amount)}
@@ -889,11 +892,11 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, onAd
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: T.muted }}>đ</span>
             </div>
           </div>
-          <button type="submit" className="rounded-lg px-3 py-2 text-white text-sm font-medium flex items-center gap-1" style={{ background: T.ink }}>
+          <button type="submit" className={`rounded-lg px-3 py-2 text-white text-sm font-medium flex items-center justify-center gap-1 ${mobile ? "w-full" : ""}`} style={{ background: T.ink }}>
             {editingCat ? <Check size={14} /> : <Plus size={14} />} {editingCat ? "Lưu" : "Thêm"}
           </button>
           {editingCat && (
-            <button type="button" onClick={cancelEditCat} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: T.border, color: T.muted }}>Hủy</button>
+            <button type="button" onClick={cancelEditCat} className={`rounded-lg border px-3 py-2 text-sm ${mobile ? "w-full" : ""}`} style={{ borderColor: T.border, color: T.muted }}>Hủy</button>
           )}
         </form>
 
@@ -1440,6 +1443,7 @@ export default function App() {
       {tab === "budget" && (
         <BudgetTab
           budgets={budgets} month={month} categories={categories} transactions={transactions} hideAmounts={hideAmounts}
+          viewMode={viewMode === "app" ? "app" : "web"}
           onAddExpenseCategory={addExpenseCategory} onUpsertBudget={upsertBudget} onDeleteBudget={deleteBudget}
         />
       )}
