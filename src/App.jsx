@@ -1507,7 +1507,7 @@ export default function App() {
 
     if (realDevice) {
       return (
-        <div className="ff-sans" style={{ height: "100dvh", background: T.page, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div className="ff-sans" style={{ position: "fixed", inset: 0, background: T.page, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <FontImport />
           {header}
           <div style={{ flex: 1, overflowY: "auto", padding: "6px 16px 16px" }}>{content}</div>
