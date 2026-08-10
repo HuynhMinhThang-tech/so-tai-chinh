@@ -2,8 +2,15 @@
 -- SCHEMA: "Sổ Tài Chính" — cơ sở dữ liệu quan hệ cho app quản lý thu chi
 -- Dán toàn bộ nội dung này vào Supabase → SQL Editor → Run
 -- (An toàn khi chạy lại nhiều lần nhờ IF NOT EXISTS)
--- Đây là 4 bảng MỚI, không đụng tới các bảng tasks / task_results / task_result_files
+-- Đây là 5 bảng, không đụng tới các bảng tasks / task_results / task_result_files
 -- của app "Việc Của Tôi" — có thể chạy trên CÙNG một project Supabase.
+--
+-- CẬP NHẬT so với bản trước:
+--   1) fin_transactions: thêm cột payment_method ('cash' | 'bank') để tách
+--      dòng tiền mặt và dòng chuyển khoản ngân hàng.
+--   2) Bảng mới fin_wallet_transfers: ghi lại các lượt "rút tiền mặt" /
+--      "nộp tiền vào tài khoản" — chuyển đổi qua lại giữa 2 ví, không làm
+--      thay đổi tổng số dư.
 -- ============================================================
 
 -- Danh mục thu nhập / chi tiêu (cấp 1), ví dụ: "Ăn uống", "Lương"...
@@ -28,14 +35,33 @@ create table if not exists fin_subcategories (
 
 -- Từng khoản ghi thu / chi thực tế
 create table if not exists fin_transactions (
-  id            bigint generated always as identity primary key,
-  type          text not null check (type in ('income', 'expense')),
-  date          date not null,
-  category      text not null,
-  subcategory   text,
-  amount        numeric(14, 0) not null check (amount > 0),
-  created_at    timestamptz not null default now()
+  id              bigint generated always as identity primary key,
+  type            text not null check (type in ('income', 'expense')),
+  date            date not null,
+  category        text not null,
+  subcategory     text,
+  amount          numeric(14, 0) not null check (amount > 0),
+  -- Hình thức: tiền mặt hay chuyển khoản ngân hàng. Mặc định 'bank' để tương thích
+  -- ngược với các khoản ghi cũ đã tồn tại trước khi có tính năng này.
+  payment_method  text not null default 'bank' check (payment_method in ('cash', 'bank')),
+  created_at      timestamptz not null default now()
 );
+
+-- Nếu bảng fin_transactions đã tồn tại từ trước (chưa có cột payment_method),
+-- lệnh này sẽ tự thêm cột vào — an toàn khi chạy lại nhiều lần.
+alter table fin_transactions
+  add column if not exists payment_method text not null default 'bank';
+-- Đảm bảo ràng buộc check tồn tại (bỏ qua nếu đã có, tránh lỗi khi chạy lại).
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'fin_transactions_payment_method_check'
+  ) then
+    alter table fin_transactions
+      add constraint fin_transactions_payment_method_check
+      check (payment_method in ('cash', 'bank'));
+  end if;
+end $$;
 
 -- Hạn mức ngân sách theo từng tháng, cho từng danh mục chi tiêu
 create table if not exists fin_budgets (
@@ -47,11 +73,27 @@ create table if not exists fin_budgets (
   unique (month, category)
 );
 
+-- Lịch sử chuyển đổi giữa "Tiền mặt" và "Tài khoản ngân hàng" (VD: rút tiền mặt từ
+-- ATM, hoặc nộp tiền mặt vào tài khoản). Đây KHÔNG phải là một khoản thu/chi —
+-- chỉ tái phân bổ giữa 2 ví, nên không cộng/trừ vào tổng số dư.
+create table if not exists fin_wallet_transfers (
+  id          bigint generated always as identity primary key,
+  date        date not null,
+  -- 'bank_to_cash' = rút tiền mặt (tài khoản giảm, tiền mặt tăng)
+  -- 'cash_to_bank' = nộp vào tài khoản (tiền mặt giảm, tài khoản tăng)
+  direction   text not null check (direction in ('bank_to_cash', 'cash_to_bank')),
+  amount      numeric(14, 0) not null check (amount > 0),
+  note        text,
+  created_at  timestamptz not null default now()
+);
+
 -- Index giúp truy vấn nhanh theo ngày, theo loại, theo tháng ngân sách
 create index if not exists idx_fin_tx_date on fin_transactions (date);
 create index if not exists idx_fin_tx_type on fin_transactions (type);
+create index if not exists idx_fin_tx_payment_method on fin_transactions (payment_method);
 create index if not exists idx_fin_budgets_month on fin_budgets (month);
 create index if not exists idx_fin_subcategories_category_id on fin_subcategories (category_id);
+create index if not exists idx_fin_wallet_transfers_date on fin_wallet_transfers (date);
 
 -- ------------------------------------------------------------
 -- BẢO MẬT (giống hệt cách làm với app "Việc Của Tôi")
@@ -63,6 +105,7 @@ alter table fin_categories enable row level security;
 alter table fin_subcategories enable row level security;
 alter table fin_transactions enable row level security;
 alter table fin_budgets enable row level security;
+alter table fin_wallet_transfers enable row level security;
 
 drop policy if exists "allow all on fin_categories" on fin_categories;
 create policy "allow all on fin_categories"
@@ -85,6 +128,12 @@ create policy "allow all on fin_transactions"
 drop policy if exists "allow all on fin_budgets" on fin_budgets;
 create policy "allow all on fin_budgets"
   on fin_budgets for all
+  using (true)
+  with check (true);
+
+drop policy if exists "allow all on fin_wallet_transfers" on fin_wallet_transfers;
+create policy "allow all on fin_wallet_transfers"
+  on fin_wallet_transfers for all
   using (true)
   with check (true);
 

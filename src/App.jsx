@@ -7,7 +7,7 @@ import {
 import {
   Wallet, TrendingUp, TrendingDown, PiggyBank, ChevronDown, ChevronRight,
   Plus, Pencil, Trash2, LayoutGrid, GitBranch, NotebookPen, X, Check,
-  Monitor, Smartphone, Target, Eye, EyeOff,
+  Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, ArrowLeftRight, AlertTriangle,
 } from "lucide-react";
 
 // ---------- Theme: DÙNG CHUNG bảng màu & font với app "Việc Của Tôi" ----------
@@ -96,8 +96,17 @@ function buildPieLabelPositions(data, cx, cy, outerRadius) {
   });
   return items;
 }
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const currentMonth = () => new Date().toISOString().slice(0, 7);
+// Trả về ngày YYYY-MM-DD theo GIỜ ĐỊA PHƯƠNG (không dùng toISOString() vì nó quy đổi
+// sang UTC trước, khiến bất kỳ thời điểm nào trước giờ lệch UTC (VD: ở UTC+7, mọi thời điểm
+// trước 7h sáng giờ VN) đều bị lùi về "hôm qua" — đây chính là lỗi ghi 00h05 ngày 9/8 nhưng
+// bị tính vào ngày 8/8.
+function pad2(n) { return String(n).padStart(2, "0"); }
+function localISODate(dateLike = new Date()) {
+  const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+const todayISO = () => localISODate(new Date());
+const currentMonth = () => todayISO().slice(0, 7);
 function colorFor(name, index) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
@@ -156,7 +165,18 @@ function mapCategoriesFromRows(catRows, subRows) {
   return { income: build("income"), expense: build("expense") };
 }
 function mapTransactionRow(row) {
-  return { id: row.id, type: row.type, date: row.date, category: row.category, subcategory: row.subcategory || "", amount: Number(row.amount) };
+  return {
+    id: row.id,
+    type: row.type,
+    date: row.date,
+    category: row.category,
+    subcategory: row.subcategory || "",
+    amount: Number(row.amount),
+    paymentMethod: row.payment_method === "cash" ? "cash" : "bank",
+  };
+}
+function mapWalletTransferRow(row) {
+  return { id: row.id, date: row.date, direction: row.direction, amount: Number(row.amount), note: row.note || "", createdAt: row.created_at };
 }
 function mapBudgetsFromRows(rows) {
   const budgets = {};
@@ -258,7 +278,7 @@ function AmountVisibilityToggle({ hidden, onChange, full = false }) {
 }
 
 // ---------- Tab 1: Overview ----------
-function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "web" }) {
+function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "web", walletBalances }) {
   const mobile = viewMode === "app";
   // Kích thước chữ / góc nghiêng trục biểu đồ co giãn theo giao diện đang xem: ở "app"
   // (màn hình hẹp) chữ cần nhỏ hơn và nhãn trục X cần nghiêng nhiều hơn để không bị chật/đè chữ.
@@ -342,11 +362,17 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
 
   return (
     <div className="space-y-5">
-      <div className={`grid gap-3 ${mobile ? "grid-cols-1" : "grid-cols-4"}`}>
+      <div className={`grid gap-3 ${mobile ? "grid-cols-1" : "grid-cols-3"}`}>
         <KpiCard icon={TrendingUp} label="Tổng thu nhập tháng" value={mfmt(totalIncome, hideAmounts)} accent={T.green} />
         <KpiCard icon={PiggyBank} label={unallocatedBudget < 0 ? "Ngân sách vượt thu nhập" : "Chưa phân bổ"} value={mfmt(Math.abs(unallocatedBudget), hideAmounts)} accent={unallocatedBudget < 0 ? T.rust : T.olive} />
         <KpiCard icon={TrendingDown} label="Tổng chi tiêu" value={mfmt(totalExpense, hideAmounts)} accent={T.rust} />
-        <KpiCard icon={Wallet} label="Số dư" value={mfmt(balance, hideAmounts)} accent={balance >= 0 ? T.green : T.rust} />
+        <KpiCard icon={Wallet} label="Số dư tháng này" value={mfmt(balance, hideAmounts)} accent={balance >= 0 ? T.green : T.rust} />
+        {walletBalances && (
+          <>
+            <KpiCard icon={Banknote} label="Tiền mặt hiện có" value={mfmt(walletBalances.cash, hideAmounts)} accent={walletBalances.cash < 0 ? T.rust : T.olive} />
+            <KpiCard icon={Landmark} label="Tiền trong tài khoản" value={mfmt(walletBalances.bank, hideAmounts)} accent={walletBalances.bank < 0 ? T.rust : T.green} />
+          </>
+        )}
       </div>
 
       <div className="rounded-2xl bg-white p-4">
@@ -938,12 +964,26 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
             const pctSpent = budget ? Math.min(100, Math.round((spent / budget) * 100)) : 0;
             const color = colorFor(name);
             return (
-              <div key={name} className="p-3 rounded-xl" style={{ border: `1px solid ${T.border}`, borderLeft: `4px solid ${color}` }}>
+              <div
+                key={name}
+                className="p-3 rounded-xl"
+                style={
+                  over
+                    ? { border: `1.5px solid ${T.rust}`, borderLeft: `4px solid ${T.rust}`, background: T.rustSoft }
+                    : { border: `1px solid ${T.border}`, borderLeft: `4px solid ${color}` }
+                }
+              >
                 <div className="flex items-center justify-between gap-3 mb-2">
-                  <p className="text-sm font-medium truncate" style={{ color: T.ink }}>
+                  <p className="text-sm font-medium truncate flex items-center gap-1.5" style={{ color: T.ink }}>
+                    {over && <AlertTriangle size={14} style={{ color: T.rust, flexShrink: 0 }} />}
                     {name} - <span className="italic" style={{ color: T.ink }}>{mfmt(budget, hideAmounts)}</span>
                   </p>
                   <div className="flex items-center gap-1 shrink-0">
+                    {over && (
+                      <span className="text-[10px] font-semibold px-2 py-1 rounded-full whitespace-nowrap" style={{ background: T.rust, color: "#fff" }}>
+                        Vượt ngân sách
+                      </span>
+                    )}
                     <button onClick={() => startEditCat(name)} className="p-1.5 rounded-md" style={{ color: T.muted }}><Pencil size={13} /></button>
                     <button onClick={() => removeCatBudget(name)} className="p-1.5 rounded-md" style={{ color: T.muted }}><Trash2 size={13} /></button>
                   </div>
@@ -970,9 +1010,13 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
 // ---------- Tab 3: Entry log ----------
 const NEW_OPTION = "__new__";
 
-function EntryTab({ transactions, month, categories, budgets, viewMode = "web", hideAmounts, onAddTransaction, onUpdateTransaction, onDeleteTransaction, onAddIncomeCategory, onAddSubcategory }) {
+function EntryTab({
+  transactions, month, categories, budgets, viewMode = "web", hideAmounts,
+  onAddTransaction, onUpdateTransaction, onDeleteTransaction, onAddIncomeCategory, onAddSubcategory,
+  walletBalances, walletTransfers, onAddWalletTransfer, onDeleteWalletTransfer,
+}) {
   const mobile = viewMode === "app";
-  const emptyForm = { type: "expense", category: "", subcategory: "", amount: "", date: todayISO() };
+  const emptyForm = { type: "expense", category: "", subcategory: "", amount: "", date: todayISO(), paymentMethod: "bank" };
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [addingNewCategory, setAddingNewCategory] = useState(false);
@@ -1022,7 +1066,7 @@ function EntryTab({ transactions, month, categories, budgets, viewMode = "web", 
   };
   const startEdit = (t) => {
     setEditingId(t.id);
-    setForm({ type: t.type, category: t.category, subcategory: t.subcategory, amount: String(t.amount), date: t.date });
+    setForm({ type: t.type, category: t.category, subcategory: t.subcategory, amount: String(t.amount), date: t.date, paymentMethod: t.paymentMethod === "cash" ? "cash" : "bank" });
     setAddingNewCategory(false); setNewCategoryName("");
     setAddingNewSub(false); setNewSubName("");
   };
@@ -1050,13 +1094,28 @@ function EntryTab({ transactions, month, categories, budgets, viewMode = "web", 
     e.preventDefault();
     if (!form.category || !form.amount || !form.date) return;
     if (form.date > todayISO()) return;
-    const record = { type: form.type, date: form.date, category: form.category, subcategory: form.subcategory, amount: Number(form.amount) };
+    if (insufficientWallet) return;
+    const record = { type: form.type, date: form.date, category: form.category, subcategory: form.subcategory, amount: Number(form.amount), paymentMethod: form.paymentMethod === "cash" ? "cash" : "bank" };
     if (editingId) await onUpdateTransaction(editingId, record);
     else await onAddTransaction(record);
     resetForm();
   };
+  // Khi ghi một khoản CHI, không được phép vượt quá số dư hiện có của đúng ví (tiền mặt / tài
+  // khoản) đang chọn — tránh để ví bị âm. Nếu đang SỬA một khoản chi cũ dùng CÙNG ví, cộng lại
+  // đúng số tiền cũ vào "số dư khả dụng" trước khi so sánh, vì số tiền cũ đó đã bị trừ vào ví rồi.
+  const originalTx = editingId ? transactions.find((t) => t.id === editingId) : null;
+  const walletKey = form.paymentMethod === "cash" ? "cash" : "bank";
+  const availableInWallet = useMemo(() => {
+    if (!walletBalances) return Infinity;
+    let base = walletBalances[walletKey];
+    if (originalTx && originalTx.type === "expense" && (originalTx.paymentMethod === "cash" ? "cash" : "bank") === walletKey) {
+      base += originalTx.amount;
+    }
+    return base;
+  }, [walletBalances, walletKey, originalTx]);
+  const insufficientWallet = form.type === "expense" && !!walletBalances && Number(form.amount) > availableInWallet;
   // Chỉ hợp lệ khi có đủ danh mục, số tiền, và ngày — phần chi tiết (subcategory) không bắt buộc.
-  const canSubmit = !!form.category && !!form.amount && Number(form.amount) > 0 && !!form.date && form.date <= todayISO();
+  const canSubmit = !!form.category && !!form.amount && Number(form.amount) > 0 && !!form.date && form.date <= todayISO() && !insufficientWallet;
 
   const inputStyle = { borderColor: T.border, color: T.ink, background: T.card };
   const formatAmount = (raw) => (raw ? Number(raw).toLocaleString("vi-VN") : "");
@@ -1067,7 +1126,8 @@ function EntryTab({ transactions, month, categories, budgets, viewMode = "web", 
 
   return (
     <div className={`grid gap-5 ${mobile ? "grid-cols-1" : "grid-cols-5"}`}>
-      <form onSubmit={submit} className={`rounded-2xl bg-white p-5 h-fit space-y-4 ${mobile ? "" : "col-span-2"}`}>
+      <div className={mobile ? "space-y-4" : "col-span-2 space-y-4"}>
+      <form onSubmit={submit} className="rounded-2xl bg-white p-5 h-fit space-y-4">
         <h3 className="text-sm font-medium" style={{ color: T.ink }}>{editingId ? "Sửa khoản ghi" : "Ghi thu / chi mới"}</h3>
 
         <div className="flex rounded-lg overflow-hidden text-sm" style={{ border: `1px solid ${T.border}` }}>
@@ -1078,6 +1138,26 @@ function EntryTab({ transactions, month, categories, budgets, viewMode = "web", 
               {t === "income" ? "Thu nhập" : "Chi tiêu"}
             </button>
           ))}
+        </div>
+
+        <div>
+          <label className="text-xs mb-1 block" style={{ color: T.muted }}>Hình thức</label>
+          <div className="flex rounded-lg overflow-hidden text-sm" style={{ border: `1px solid ${T.border}` }}>
+            {[
+              { key: "bank", label: "Chuyển khoản", icon: Landmark },
+              { key: "cash", label: "Tiền mặt", icon: Banknote },
+            ].map((opt) => {
+              const Icon = opt.icon;
+              const active = form.paymentMethod === opt.key;
+              return (
+                <button type="button" key={opt.key} onClick={() => setForm((f) => ({ ...f, paymentMethod: opt.key }))}
+                  className="flex-1 py-2 font-medium transition-colors flex items-center justify-center gap-1.5"
+                  style={active ? { background: T.ink, color: "#fff" } : { background: "#fff", color: T.muted }}>
+                  <Icon size={13} /> {opt.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div>
@@ -1147,6 +1227,11 @@ function EntryTab({ transactions, month, categories, budgets, viewMode = "web", 
               placeholder="0" className="w-full rounded-lg border pl-3 pr-9 py-2 text-sm focus:outline-none" style={inputStyle} />
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: T.muted }}>đ</span>
           </div>
+          {insufficientWallet && (
+            <p className="text-[11px] mt-1.5" style={{ color: T.rust }}>
+              {walletKey === "cash" ? "Ví tiền mặt" : "Tài khoản ngân hàng"} không đủ số dư — hiện chỉ còn {mfmt(availableInWallet, hideAmounts)}.
+            </p>
+          )}
         </div>
 
         <div>
@@ -1167,7 +1252,11 @@ function EntryTab({ transactions, month, categories, budgets, viewMode = "web", 
         </div>
       </form>
 
-      <div className={`rounded-2xl bg-white overflow-hidden ${mobile ? "" : "col-span-3"}`}>
+      <WalletTransferPanel walletBalances={walletBalances} onAddWalletTransfer={onAddWalletTransfer} hideAmounts={hideAmounts} mobile={mobile} />
+      </div>
+
+      <div className={mobile ? "space-y-4" : "col-span-3 space-y-4"}>
+      <div className="rounded-2xl bg-white overflow-hidden">
         <div className="p-4" style={{ borderBottom: `1px solid ${T.border}` }}>
           <h3 className="text-sm font-medium mb-3" style={{ color: T.ink }}>Nhật ký {monthLabel(month)}</h3>
           <div className={`flex gap-2 ${mobile ? "flex-col" : "items-center justify-between flex-wrap"}`}>
@@ -1237,9 +1326,12 @@ function EntryTab({ transactions, month, categories, budgets, viewMode = "web", 
                         </div>
                       </div>
                       <div className="h-1 rounded-full mt-3 mb-2.5" style={{ background: t.type === "income" ? T.green : T.rust, opacity: 0.85, width: "100%" }} />
-                      <p className="text-sm font-semibold" style={{ color: t.type === "income" ? T.green : T.rust }}>
-                        {t.type === "income" ? "+" : "-"}{mfmt(t.amount, hideAmounts)}
-                      </p>
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold" style={{ color: t.type === "income" ? T.green : T.rust }}>
+                          {t.type === "income" ? "+" : "-"}{mfmt(t.amount, hideAmounts)}
+                        </p>
+                        <PaymentMethodBadge method={t.paymentMethod} />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1256,6 +1348,7 @@ function EntryTab({ transactions, month, categories, budgets, viewMode = "web", 
                   <p className="text-sm font-medium truncate" style={{ color: T.ink }}>{t.category}{t.subcategory ? ` · ${t.subcategory}` : ""}</p>
                   <p className="text-xs" style={{ color: T.muted }}>{t.date}</p>
                 </div>
+                <PaymentMethodBadge method={t.paymentMethod} />
                 <p className="text-sm font-semibold shrink-0" style={{ color: t.type === "income" ? T.green : T.rust }}>
                   {t.type === "income" ? "+" : "-"}{mfmt(t.amount, hideAmounts)}
                 </p>
@@ -1268,6 +1361,137 @@ function EntryTab({ transactions, month, categories, budgets, viewMode = "web", 
           </div>
         )}
       </div>
+
+      <WalletTransferHistory walletTransfers={walletTransfers} onDeleteWalletTransfer={onDeleteWalletTransfer} hideAmounts={hideAmounts} mobile={mobile} />
+      </div>
+    </div>
+  );
+}
+
+// ---------- Ví tiền: badge hình thức thanh toán + panel chuyển đổi tiền mặt <-> ngân hàng ----------
+function PaymentMethodBadge({ method }) {
+  const isCash = method === "cash";
+  const Icon = isCash ? Banknote : Landmark;
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2 py-1 rounded-full shrink-0"
+      style={{ background: isCash ? T.oliveSoft : T.greenSoft, color: isCash ? T.olive : T.green }}
+    >
+      <Icon size={11} /> {isCash ? "Tiền mặt" : "Chuyển khoản"}
+    </span>
+  );
+}
+
+// Panel nhỏ để "rút tiền mặt" / "nộp tiền vào tài khoản" — chuyển đổi qua lại giữa 2 ví,
+// không đổi tổng số dư. Đặt ngay dưới form "Ghi thu / chi mới".
+function WalletTransferPanel({ walletBalances, onAddWalletTransfer, hideAmounts, mobile }) {
+  const [direction, setDirection] = useState("bank_to_cash"); // rút tiền mặt (mặc định) hoặc nộp vào tài khoản
+  const [amount, setAmount] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  if (!walletBalances) return null;
+
+  const inputStyle = { borderColor: T.border, color: T.ink, background: T.card };
+  const formatAmount = (raw) => (raw ? Number(raw).toLocaleString("vi-VN") : "");
+  const amountNum = Number(amount) || 0;
+  const sourceBalance = direction === "bank_to_cash" ? walletBalances.bank : walletBalances.cash;
+  const insufficientFunds = amountNum > sourceBalance;
+  const canSubmit = amountNum > 0 && !insufficientFunds;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+    setSubmitting(true);
+    await onAddWalletTransfer({ direction, amount: amountNum });
+    setSubmitting(false);
+    setAmount("");
+  };
+
+  return (
+    <div className="rounded-2xl bg-white p-4">
+      <div className="flex items-center gap-1.5 mb-3">
+        <ArrowLeftRight size={14} style={{ color: T.muted }} />
+        <h3 className="text-sm font-medium" style={{ color: T.ink }}>Chuyển đổi Tiền mặt ⇄ Tài khoản</h3>
+      </div>
+
+      <div className={`grid gap-2 mb-3 ${mobile ? "grid-cols-2" : "grid-cols-2"}`}>
+        <div className="rounded-xl px-3 py-2.5" style={{ background: T.oliveSoft }}>
+          <p className="text-[11px] flex items-center gap-1" style={{ color: T.olive }}><Banknote size={11} /> Tiền mặt</p>
+          <p className="text-sm font-semibold mt-0.5" style={{ color: T.ink }}>{mfmt(walletBalances.cash, hideAmounts)}</p>
+        </div>
+        <div className="rounded-xl px-3 py-2.5" style={{ background: T.greenSoft }}>
+          <p className="text-[11px] flex items-center gap-1" style={{ color: T.green }}><Landmark size={11} /> Tài khoản</p>
+          <p className="text-sm font-semibold mt-0.5" style={{ color: T.ink }}>{mfmt(walletBalances.bank, hideAmounts)}</p>
+        </div>
+      </div>
+
+      <form onSubmit={submit} className="space-y-2.5">
+        <div className="flex rounded-lg overflow-hidden text-xs" style={{ border: `1px solid ${T.border}` }}>
+          <button type="button" onClick={() => setDirection("bank_to_cash")}
+            className="flex-1 py-2 font-medium transition-colors flex items-center justify-center gap-1"
+            style={direction === "bank_to_cash" ? { background: T.ink, color: "#fff" } : { background: "#fff", color: T.muted }}>
+            <Landmark size={12} /> → <Banknote size={12} /> Rút tiền mặt
+          </button>
+          <button type="button" onClick={() => setDirection("cash_to_bank")}
+            className="flex-1 py-2 font-medium transition-colors flex items-center justify-center gap-1"
+            style={direction === "cash_to_bank" ? { background: T.ink, color: "#fff" } : { background: "#fff", color: T.muted }}>
+            <Banknote size={12} /> → <Landmark size={12} /> Nộp vào TK
+          </button>
+        </div>
+        <div className="relative">
+          <input
+            type="text" inputMode="numeric" value={formatAmount(amount)}
+            onChange={(e) => setAmount(e.target.value.replace(/\D/g, ""))}
+            placeholder="Số tiền chuyển đổi" className="w-full rounded-lg border pl-3 pr-9 py-2 text-sm focus:outline-none" style={inputStyle} />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: T.muted }}>đ</span>
+        </div>
+        {insufficientFunds && (
+          <p className="text-[11px]" style={{ color: T.rust }}>Ví nguồn không đủ tiền — hiện chỉ còn {mfmt(sourceBalance, hideAmounts)}, không thể chuyển đổi số tiền lớn hơn.</p>
+        )}
+        <button type="submit" disabled={!canSubmit || submitting}
+          className="w-full rounded-lg text-white text-sm font-medium py-2 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{ background: T.ink }}>
+          <ArrowLeftRight size={13} /> Xác nhận chuyển đổi
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// Lịch sử các lượt chuyển đổi tiền mặt <-> tài khoản — hiển thị gọn bên dưới nhật ký tháng.
+function WalletTransferHistory({ walletTransfers, onDeleteWalletTransfer, hideAmounts, mobile }) {
+  if (!walletTransfers) return null;
+  const recent = walletTransfers.slice(0, 8);
+  return (
+    <div className="rounded-2xl bg-white p-4">
+      <div className="flex items-center gap-1.5 mb-2.5">
+        <ArrowLeftRight size={13} style={{ color: T.muted }} />
+        <h3 className="text-xs font-medium" style={{ color: T.ink }}>Lịch sử chuyển đổi tiền mặt ⇄ tài khoản</h3>
+      </div>
+      {recent.length === 0 ? (
+        <p className="text-xs py-2" style={{ color: T.muted }}>Chưa có lượt chuyển đổi nào.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {recent.map((w) => {
+            const toCash = w.direction === "bank_to_cash";
+            return (
+              <div key={w.id} className="flex items-center gap-2 text-xs">
+                <span className="shrink-0" style={{ color: T.muted }}>{w.date}</span>
+                <span className="flex items-center gap-1 flex-1 min-w-0" style={{ color: T.ink }}>
+                  {toCash ? <Landmark size={11} style={{ color: T.green }} /> : <Banknote size={11} style={{ color: T.olive }} />}
+                  <ArrowLeftRight size={10} style={{ color: T.muted }} />
+                  {toCash ? <Banknote size={11} style={{ color: T.olive }} /> : <Landmark size={11} style={{ color: T.green }} />}
+                </span>
+                <span className="font-semibold shrink-0" style={{ color: T.ink }}>{mfmt(w.amount, hideAmounts)}</span>
+                {onDeleteWalletTransfer && (
+                  <button onClick={() => onDeleteWalletTransfer(w.id)} className="shrink-0 p-1 rounded-md" style={{ color: T.muted }}>
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1326,6 +1550,7 @@ export default function App() {
   const [transactions, setTransactions] = useState([]);
   const [categories, setCategories] = useState({ income: [], expense: [] });
   const [budgets, setBudgets] = useState({});
+  const [walletTransfers, setWalletTransfers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [tab, setTab] = useState("overview");
@@ -1352,13 +1577,14 @@ export default function App() {
     setLoading(true);
     setLoadError(null);
 
-    const [catRes, subRes, txRes, budgetRes] = await Promise.all([
+    const [catRes, subRes, txRes, budgetRes, transferRes] = await Promise.all([
       supabase.from("fin_categories").select("*"),
       supabase.from("fin_subcategories").select("*"),
       supabase.from("fin_transactions").select("*").order("date", { ascending: false }),
       supabase.from("fin_budgets").select("*"),
+      supabase.from("fin_wallet_transfers").select("*").order("date", { ascending: false }).order("created_at", { ascending: false }),
     ]);
-    const err = catRes.error || subRes.error || txRes.error || budgetRes.error;
+    const err = catRes.error || subRes.error || txRes.error || budgetRes.error || transferRes.error;
     if (err) {
       setLoadError(err.message);
       setLoading(false);
@@ -1367,6 +1593,7 @@ export default function App() {
     setCategories(mapCategoriesFromRows(catRes.data, subRes.data));
     setTransactions((txRes.data || []).map(mapTransactionRow));
     setBudgets(mapBudgetsFromRows(budgetRes.data));
+    setWalletTransfers((transferRes.data || []).map(mapWalletTransferRow));
     setLoading(false);
   }, []);
 
@@ -1375,19 +1602,52 @@ export default function App() {
   /* ---------- handlers: mỗi hàm cập nhật UI ngay, rồi đồng bộ với Supabase ---------- */
   const addTransaction = async (record) => {
     if (!supabase) { setLoadError("Chưa cấu hình Supabase — không thể lưu khoản ghi."); return; }
+    if (record.type === "expense") {
+      const walletKey = record.paymentMethod === "cash" ? "cash" : "bank";
+      if (record.amount > walletBalances[walletKey]) {
+        alert(`${walletKey === "cash" ? "Ví tiền mặt" : "Tài khoản ngân hàng"} không đủ số dư để ghi khoản chi này.`);
+        return;
+      }
+    }
     const { data, error } = await supabase
       .from("fin_transactions")
-      .insert({ type: record.type, date: record.date, category: record.category, subcategory: record.subcategory || null, amount: record.amount })
+      .insert({
+        type: record.type,
+        date: record.date,
+        category: record.category,
+        subcategory: record.subcategory || null,
+        amount: record.amount,
+        payment_method: record.paymentMethod === "cash" ? "cash" : "bank",
+      })
       .select().single();
     if (error) { setLoadError(error.message); return; }
     setTransactions((prev) => [mapTransactionRow(data), ...prev]);
   };
   const updateTransaction = async (id, record) => {
+    if (record.type === "expense") {
+      const walletKey = record.paymentMethod === "cash" ? "cash" : "bank";
+      const original = transactions.find((t) => t.id === id);
+      let available = walletBalances[walletKey];
+      if (original && original.type === "expense" && (original.paymentMethod === "cash" ? "cash" : "bank") === walletKey) {
+        available += original.amount;
+      }
+      if (record.amount > available) {
+        alert(`${walletKey === "cash" ? "Ví tiền mặt" : "Tài khoản ngân hàng"} không đủ số dư để lưu thay đổi này.`);
+        return;
+      }
+    }
     setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...record } : t)));
     if (!supabase) return;
     const { error } = await supabase
       .from("fin_transactions")
-      .update({ type: record.type, date: record.date, category: record.category, subcategory: record.subcategory || null, amount: record.amount })
+      .update({
+        type: record.type,
+        date: record.date,
+        category: record.category,
+        subcategory: record.subcategory || null,
+        amount: record.amount,
+        payment_method: record.paymentMethod === "cash" ? "cash" : "bank",
+      })
       .eq("id", id);
     if (error) setLoadError(error.message);
   };
@@ -1395,6 +1655,30 @@ export default function App() {
     setTransactions((prev) => prev.filter((t) => t.id !== id));
     if (!supabase) return;
     const { error } = await supabase.from("fin_transactions").delete().eq("id", id);
+    if (error) setLoadError(error.message);
+  };
+
+  // Chuyển đổi qua lại giữa tiền mặt và tài khoản ngân hàng (VD: rút tiền mặt từ ATM,
+  // hoặc nộp tiền mặt vào tài khoản). Không làm thay đổi TỔNG số dư — chỉ tái phân bổ
+  // giữa 2 "ví", nên không cần ghi thêm 1 khoản thu/chi nào cả.
+  const addWalletTransfer = async ({ direction, amount, note }) => {
+    if (!amount || amount <= 0) return;
+    // Chặn chuyển đổi vượt quá số dư thực có của ví nguồn (không để ví nào bị âm).
+    const sourceBalance = direction === "bank_to_cash" ? walletBalances.bank : walletBalances.cash;
+    if (amount > sourceBalance) {
+      alert("Ví nguồn không đủ tiền để thực hiện chuyển đổi này.");
+      return;
+    }
+    if (!supabase) { setLoadError("Chưa cấu hình Supabase — không thể lưu lượt chuyển đổi."); return; }
+    const payload = { date: todayISO(), direction, amount, note: note || null };
+    const { data, error } = await supabase.from("fin_wallet_transfers").insert(payload).select().single();
+    if (error) { setLoadError(error.message); return; }
+    setWalletTransfers((prev) => [mapWalletTransferRow(data), ...prev]);
+  };
+  const deleteWalletTransfer = async (id) => {
+    setWalletTransfers((prev) => prev.filter((w) => w.id !== id));
+    if (!supabase) return;
+    const { error } = await supabase.from("fin_wallet_transfers").delete().eq("id", id);
     if (error) setLoadError(error.message);
   };
 
@@ -1450,6 +1734,26 @@ export default function App() {
   const currentTabLabel = tabs.find((t) => t.id === tab)?.label;
   const txCountThisMonth = transactions.filter((t) => t.date.startsWith(month)).length;
 
+  // Số dư tiền mặt / tài khoản ngân hàng — tính LŨY KẾ từ trước tới nay (không giới hạn
+  // theo tháng đang lọc), vì đây là số dư thực tế đang có trong ví/tài khoản, giống hệt
+  // cách một cuốn sổ quỹ thật hoạt động. Tổng 2 số này luôn khớp đúng bằng tổng số dư
+  // (tổng thu - tổng chi) tính từ trước đến nay — các lượt "chuyển đổi" chỉ tái phân bổ
+  // giữa 2 ví, không làm thay đổi tổng số dư.
+  const walletBalances = useMemo(() => {
+    let cash = 0;
+    let total = 0;
+    transactions.forEach((t) => {
+      const signed = t.type === "income" ? t.amount : -t.amount;
+      total += signed;
+      if (t.paymentMethod === "cash") cash += signed;
+    });
+    walletTransfers.forEach((w) => {
+      if (w.direction === "cash_to_bank") cash -= w.amount;
+      else cash += w.amount;
+    });
+    return { cash, bank: total - cash, total };
+  }, [transactions, walletTransfers]);
+
   const statusBanner =
     loading || loadError ? (
       <div
@@ -1466,7 +1770,7 @@ export default function App() {
   const content = (
     <>
       {statusBanner}
-      {tab === "overview" && <OverviewTab transactions={transactions} month={month} budgets={budgets} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} />}
+      {tab === "overview" && <OverviewTab transactions={transactions} month={month} budgets={budgets} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} />}
       {tab === "flow" && <CashFlowTab transactions={transactions} month={month} budgets={budgets} viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts} />}
       {tab === "budget" && (
         <BudgetTab
@@ -1481,6 +1785,8 @@ export default function App() {
           viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts}
           onAddTransaction={addTransaction} onUpdateTransaction={updateTransaction} onDeleteTransaction={deleteTransaction}
           onAddIncomeCategory={addIncomeCategory} onAddSubcategory={addSubcategory}
+          walletBalances={walletBalances} walletTransfers={walletTransfers}
+          onAddWalletTransfer={addWalletTransfer} onDeleteWalletTransfer={deleteWalletTransfer}
         />
       )}
     </>
