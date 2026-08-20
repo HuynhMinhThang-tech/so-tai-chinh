@@ -1971,16 +1971,24 @@ export default function App() {
   const content = (
     <>
       {statusBanner}
-      {tab === "overview" && <OverviewTab transactions={transactions} month={month} budgets={budgets} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} />}
-      {tab === "flow" && <CashFlowTab transactions={transactions} month={month} budgets={budgets} viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts} />}
-      {tab === "budget" && (
+      {/* Giữ cả 4 tab luôn được mount sẵn, chỉ ẩn/hiện bằng CSS (display) thay vì mount/unmount
+          mỗi lần chuyển tab. Trước đây mount/unmount liên tục khiến ResizeObserver đo chiều cao
+          ở tab "Tổng quan" bị khởi tạo lại từ đầu mỗi lần quay lại tab đó, có lúc lỡ nhịp đo và
+          hiện bảng xếp hạng dài tràn lan cho tới khi tải lại cả trang mới hết. */}
+      <div style={{ display: tab === "overview" ? "block" : "none" }}>
+        <OverviewTab transactions={transactions} month={month} budgets={budgets} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} />
+      </div>
+      <div style={{ display: tab === "flow" ? "block" : "none" }}>
+        <CashFlowTab transactions={transactions} month={month} budgets={budgets} viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts} />
+      </div>
+      <div style={{ display: tab === "budget" ? "block" : "none" }}>
         <BudgetTab
           budgets={budgets} month={month} categories={categories} transactions={transactions} hideAmounts={hideAmounts}
           viewMode={viewMode === "app" ? "app" : "web"}
           onAddExpenseCategory={addExpenseCategory} onUpsertBudget={upsertBudget} onDeleteBudget={deleteBudget}
         />
-      )}
-      {tab === "entry" && (
+      </div>
+      <div style={{ display: tab === "entry" ? "block" : "none" }}>
         <EntryTab
           transactions={transactions} month={month} categories={categories} budgets={budgets}
           viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts}
@@ -1990,7 +1998,7 @@ export default function App() {
           walletBalances={walletBalances} walletTransfers={walletTransfers}
           onAddWalletTransfer={addWalletTransfer} onDeleteWalletTransfer={deleteWalletTransfer}
         />
-      )}
+      </div>
     </>
   );
 
