@@ -291,6 +291,8 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
     xHeight: mobile ? 68 : 50,
     chartHeight: mobile ? 240 : 280,
     pieHeight: mobile ? 200 : 220,
+    // độ rộng 1 cột-ngày khi xem trên "app": đủ để 7 ngày gần nhất vừa khít vùng nhìn thấy
+    dayColWidth: 46,
   };
   const txMonth = useMemo(() => transactions.filter((t) => t.date.startsWith(month)), [transactions, month]);
   const totalIncome = txMonth.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
@@ -360,6 +362,17 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
     return Object.values(days).sort((a, b) => a.day.localeCompare(b.day));
   }, [txMonth]);
 
+  // Trên "app": biểu đồ theo ngày cuộn ngang được, mặc định cuộn tới sát mép PHẢI để
+  // luôn hiện đúng 7 ngày gần nhất tính từ hôm nay trước (các ngày đã sắp xếp tăng dần
+  // nên ngày mới nhất luôn nằm ở bên phải cùng); cuộn sang trái để xem lại các ngày cũ hơn.
+  const dayChartScrollRef = useRef(null);
+  useEffect(() => {
+    if (mobile && dayChartScrollRef.current) {
+      dayChartScrollRef.current.scrollLeft = dayChartScrollRef.current.scrollWidth;
+    }
+  }, [mobile, byDay, month]);
+  const dayChartWidth = Math.max(byDay.length * chartUI.dayColWidth, chartUI.dayColWidth * 7);
+
   return (
     <div className="space-y-5">
       <div className={`grid gap-3 ${mobile ? "grid-cols-1" : "grid-cols-3"}`}>
@@ -379,6 +392,35 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
         <h3 className="text-sm font-medium mb-2" style={{ color: T.ink }}>Thu / chi theo ngày</h3>
         {byDay.length === 0 ? (
           <p className="text-sm py-10 text-center" style={{ color: T.muted }}>Chưa có dữ liệu tháng này.</p>
+        ) : mobile ? (
+          <>
+            {/* chú thích màu đặt cố định bên ngoài vùng cuộn ngang — vì <Legend> của Recharts sẽ
+                canh giữa theo TOÀN BỘ chiều rộng biểu đồ (gồm cả phần đã cuộn qua), nên mặc định
+                cuộn về bên phải sẽ làm nó bị khuất khỏi màn hình */}
+            <div className="flex items-center gap-4 mb-2">
+              <span className="flex items-center gap-1.5 text-xs" style={{ color: T.muted }}>
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: T.green }} /> Thu nhập
+              </span>
+              <span className="flex items-center gap-1.5 text-xs" style={{ color: T.muted }}>
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: T.olive }} /> Chi tiêu
+              </span>
+            </div>
+            <div ref={dayChartScrollRef} style={{ width: "100%", height: chartUI.chartHeight, overflowX: "auto" }}>
+              <BarChart
+                data={byDay}
+                width={dayChartWidth}
+                height={chartUI.chartHeight}
+                margin={{ top: 8, right: 8, left: -4, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
+                <XAxis dataKey="day" tick={{ fontSize: chartUI.axisFont, fill: T.muted }} />
+                <YAxis width={34} tick={{ fontSize: chartUI.axisFont, fill: T.muted }} tickFormatter={(v) => (hideAmounts ? "***" : `${v / 1000000}tr`)} />
+                <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
+                <Bar dataKey="thu" name="Thu nhập" fill={T.green} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="chi" name="Chi tiêu" fill={T.olive} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </div>
+          </>
         ) : (
           <div style={{ width: "100%", height: chartUI.chartHeight }}>
             <ResponsiveContainer>
@@ -478,9 +520,9 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
           )}
         </div>
 
-        <div className="rounded-2xl bg-white p-4">
+        <div className="rounded-2xl bg-white p-4 flex flex-col">
           <h3 className="text-sm font-medium mb-3" style={{ color: T.ink }}>Xếp hạng danh mục chi tiêu</h3>
-          <div className="space-y-3 max-h-[248px] overflow-y-auto pr-1">
+          <div className="space-y-3 overflow-y-auto pr-1 flex-1" style={{ minHeight: 0 }}>
             {bySubCategory.map((c) => {
               const pct = totalExpense ? Math.round((c.value / totalExpense) * 100) : 0;
               return (
