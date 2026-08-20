@@ -373,6 +373,22 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
   }, [mobile, byDay, month]);
   const dayChartWidth = Math.max(byDay.length * chartUI.dayColWidth, chartUI.dayColWidth * 7);
 
+  // Khoá chiều cao của thẻ "Xếp hạng danh mục chi tiêu" đúng bằng chiều cao THẬT của thẻ
+  // biểu đồ tròn bên cạnh (đo bằng ResizeObserver, cập nhật lại mỗi khi nội dung/kích thước
+  // đổi) — để khung ngoài luôn bằng nhau, còn phần cuộn bên trong bị giới hạn cứng theo pixel
+  // đó (không tự phình ra theo số lượng dòng như CSS grid auto-size vẫn làm).
+  const pieCardRef = useRef(null);
+  const [pieCardHeight, setPieCardHeight] = useState(null);
+  useEffect(() => {
+    const el = pieCardRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) setPieCardHeight(entry.target.offsetHeight);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <div className="space-y-5">
       <div className={`grid gap-3 ${mobile ? "grid-cols-1" : "grid-cols-3"}`}>
@@ -439,7 +455,7 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
       </div>
 
       <div className={`grid gap-4 ${mobile ? "grid-cols-1" : "grid-cols-2"}`}>
-        <div className="rounded-2xl bg-white p-4">
+        <div className="rounded-2xl bg-white p-4" ref={pieCardRef}>
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <h3 className="text-sm font-medium" style={{ color: T.ink }}>Phân bổ dòng tiền ra theo danh mục</h3>
             <span
@@ -520,9 +536,15 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
           )}
         </div>
 
-        <div className="rounded-2xl bg-white p-4 flex flex-col">
+        <div
+          className="rounded-2xl bg-white p-4 flex flex-col"
+          style={pieCardHeight ? { height: pieCardHeight } : undefined}
+        >
           <h3 className="text-sm font-medium mb-3" style={{ color: T.ink }}>Xếp hạng danh mục chi tiêu</h3>
-          <div className="space-y-3 overflow-y-auto pr-1 flex-1" style={{ minHeight: 0 }}>
+          <div
+            className="flex flex-col gap-3 overflow-y-auto pr-1 flex-1"
+            style={{ minHeight: 0, justifyContent: bySubCategory.length > 0 ? "space-between" : "flex-start" }}
+          >
             {bySubCategory.map((c) => {
               const pct = totalExpense ? Math.round((c.value / totalExpense) * 100) : 0;
               return (
@@ -872,6 +894,13 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
   const formatAmount = (raw) => (raw ? Number(raw).toLocaleString("vi-VN") : "");
   const digitsOnly = (v) => v.replace(/\D/g, "");
 
+  // Bấm "Sửa" trên một dòng ngân sách (thường nằm phía dưới, sau khi đã cuộn xuống xem danh
+  // sách) sẽ tự cuộn màn hình lên tới đúng ô form chỉnh sửa ở trên — khỏi phải tự kéo lên lại.
+  const catFormRef = useRef(null);
+  const scrollToCatForm = () => {
+    requestAnimationFrame(() => catFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+
   // Ngân sách tổng của tháng luôn bằng đúng tổng thu nhập tháng đó (khớp với tab "Trực quan dòng tiền"),
   // không còn là con số đặt tay tách biệt — toàn bộ thu nhập là "chiếc bánh" cần phân bổ.
   const totalCatBudget = useMemo(() => Object.values(mb.categories).reduce((s, v) => s + v, 0), [mb]);
@@ -912,7 +941,7 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
     setCatForm({ category: "", amount: "" });
     setEditingCat(null);
   };
-  const startEditCat = (name) => { setEditingCat(name); setCatForm({ category: name, amount: String(mb.categories[name]) }); };
+  const startEditCat = (name) => { setEditingCat(name); setCatForm({ category: name, amount: String(mb.categories[name]) }); scrollToCatForm(); };
   const cancelEditCat = () => { setEditingCat(null); setCatForm({ category: "", amount: "" }); };
   const removeCatBudget = async (name) => {
     await onDeleteBudget(budgetMonth, name);
@@ -954,7 +983,7 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
       <div className="rounded-2xl bg-white p-5">
         <h3 className="text-sm font-medium mb-3" style={{ color: T.ink }}>Ngân sách theo danh mục — {monthLabel(budgetMonth)}</h3>
 
-        <form onSubmit={submitCatBudget} className={mobile ? "grid grid-cols-1 gap-3 mb-5" : "flex flex-wrap gap-2 mb-5 items-end"}>
+        <form onSubmit={submitCatBudget} ref={catFormRef} className={mobile ? "grid grid-cols-1 gap-3 mb-5" : "flex flex-wrap gap-2 mb-5 items-end"}>
           <div className={mobile ? "w-full" : "flex-1 min-w-[160px]"}>
             <label className="text-xs mb-1 block" style={{ color: T.muted }}>Danh mục</label>
             {!addingNewCat ? (
@@ -1052,9 +1081,96 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
 // ---------- Tab 3: Entry log ----------
 const NEW_OPTION = "__new__";
 
+// Dropdown tuỳ biến thay cho <select> gốc — cho phép có nút "X" xoá ngay bên cạnh mỗi lựa
+// chọn (danh mục / chi tiết), vì <select> gốc của trình duyệt không thể chèn nút bấm vào
+// từng dòng. Dùng khi danh sách càng ngày càng dài, cần xoá bớt danh mục không cần nữa.
+function SelectWithDelete({ value, onChange, options, placeholder, disabled, onDeleteOption, deleteTitle, addNewLabel, onAddNew }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDocPointerDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocPointerDown);
+    return () => document.removeEventListener("mousedown", onDocPointerDown);
+  }, [open]);
+
+  const inputStyle = { borderColor: T.border, color: T.ink, background: T.card };
+  const selected = options.find((o) => o.value === value);
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => !disabled && setOpen((o) => !o)}
+        className="w-full rounded-lg border px-3 py-2 text-sm text-left flex items-center justify-between gap-2 disabled:opacity-50"
+        style={inputStyle}
+      >
+        <span className="truncate" style={{ color: selected ? T.ink : T.muted }}>{selected ? selected.label : placeholder}</span>
+        <ChevronDown size={14} style={{ color: T.muted, flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+      </button>
+
+      {open && (
+        <div
+          className="absolute z-20 left-0 right-0 mt-1 rounded-lg overflow-hidden"
+          style={{ background: T.card, border: `1px solid ${T.border}`, boxShadow: "0 8px 24px rgba(32,38,31,0.14)" }}
+        >
+          <div className="max-h-60 overflow-y-auto">
+            <button
+              type="button"
+              onClick={() => { onChange(""); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-sm"
+              style={{ color: T.muted, background: !value ? T.page : "transparent" }}
+            >
+              {placeholder}
+            </button>
+            {options.map((o) => (
+              <div key={o.value} className="flex items-center" style={{ background: value === o.value ? T.page : "transparent" }}>
+                <button
+                  type="button"
+                  onClick={() => { onChange(o.value); setOpen(false); }}
+                  className="flex-1 min-w-0 text-left px-3 py-2 text-sm truncate"
+                  style={{ color: T.ink }}
+                >
+                  {o.label}
+                </button>
+                {onDeleteOption && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onDeleteOption(o.value); }}
+                    title={deleteTitle || "Xoá"}
+                    className="shrink-0 w-8 h-full flex items-center justify-center"
+                    style={{ color: T.muted }}
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {options.length === 0 && (
+              <p className="px-3 py-2 text-xs" style={{ color: T.muted }}>Chưa có lựa chọn nào.</p>
+            )}
+          </div>
+          {onAddNew && (
+            <button
+              type="button"
+              onClick={() => { onAddNew(); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-sm font-medium"
+              style={{ color: T.green, borderTop: `1px solid ${T.border}` }}
+            >
+              {addNewLabel || "+ Thêm danh mục mới"}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EntryTab({
   transactions, month, categories, budgets, viewMode = "web", hideAmounts,
   onAddTransaction, onUpdateTransaction, onDeleteTransaction, onAddIncomeCategory, onAddSubcategory,
+  onDeleteCategory, onDeleteSubcategory,
   walletBalances, walletTransfers, onAddWalletTransfer, onDeleteWalletTransfer,
 }) {
   const mobile = viewMode === "app";
@@ -1068,6 +1184,13 @@ function EntryTab({
   const [logDateFrom, setLogDateFrom] = useState("");
   const [logDateTo, setLogDateTo] = useState("");
   const [logTypeFilter, setLogTypeFilter] = useState("all"); // "all" | "income" | "expense"
+
+  // Bấm "Sửa" trên một khoản ghi (thường nằm phía dưới, sau khi đã cuộn xuống xem nhật ký)
+  // sẽ tự cuộn màn hình lên tới đúng form chỉnh sửa ở trên — khỏi phải tự kéo lên lại.
+  const entryFormRef = useRef(null);
+  const scrollToEntryForm = () => {
+    requestAnimationFrame(() => entryFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
 
   const txMonth = useMemo(() => transactions.filter((t) => t.date.startsWith(month)).sort((a, b) => b.date.localeCompare(a.date)), [transactions, month]);
   const logFilterMaxDate = useMemo(() => { const end = monthEnd(month); const today = todayISO(); return end < today ? end : today; }, [month]);
@@ -1111,6 +1234,7 @@ function EntryTab({
     setForm({ type: t.type, category: t.category, subcategory: t.subcategory, amount: String(t.amount), date: t.date, paymentMethod: t.paymentMethod === "cash" ? "cash" : "bank" });
     setAddingNewCategory(false); setNewCategoryName("");
     setAddingNewSub(false); setNewSubName("");
+    scrollToEntryForm();
   };
   const removeTx = (id) => onDeleteTransaction(id);
 
@@ -1130,6 +1254,22 @@ function EntryTab({
     await onAddSubcategory(form.type, form.category, name);
     setForm((f) => ({ ...f, subcategory: name }));
     setAddingNewSub(false); setNewSubName("");
+  };
+
+  // Xoá 1 danh mục / chi tiết ngay từ trong dropdown — vì danh sách càng ngày càng dài.
+  // Có hỏi xác nhận trước vì đây là thao tác không thể hoàn tác (các khoản đã ghi trước đó
+  // vẫn giữ nguyên, không bị xoá theo — chỉ là tên đó không còn xuất hiện để chọn nữa).
+  const handleDeleteCategory = async (name) => {
+    if (!onDeleteCategory) return;
+    if (!window.confirm(`Xoá danh mục "${name}"? Các khoản đã ghi trước đó sẽ không bị ảnh hưởng, chỉ là danh mục này sẽ không còn để chọn nữa.`)) return;
+    await onDeleteCategory(form.type, name);
+    if (form.category === name) setForm((f) => ({ ...f, category: "", subcategory: "" }));
+  };
+  const handleDeleteSubcategory = async (name) => {
+    if (!onDeleteSubcategory || !form.category) return;
+    if (!window.confirm(`Xoá chi tiết "${name}"? Các khoản đã ghi trước đó sẽ không bị ảnh hưởng.`)) return;
+    await onDeleteSubcategory(form.type, form.category, name);
+    if (form.subcategory === name) setForm((f) => ({ ...f, subcategory: "" }));
   };
 
   const submit = async (e) => {
@@ -1169,7 +1309,7 @@ function EntryTab({
   return (
     <div className={`grid gap-5 ${mobile ? "grid-cols-1" : "grid-cols-5"}`}>
       <div className={mobile ? "space-y-4" : "col-span-2 space-y-4"}>
-      <form onSubmit={submit} className="rounded-2xl bg-white p-5 h-fit space-y-4">
+      <form onSubmit={submit} ref={entryFormRef} className="rounded-2xl bg-white p-5 h-fit space-y-4">
         <h3 className="text-sm font-medium" style={{ color: T.ink }}>{editingId ? "Sửa khoản ghi" : "Ghi thu / chi mới"}</h3>
 
         <div className="flex rounded-lg overflow-hidden text-sm" style={{ border: `1px solid ${T.border}` }}>
@@ -1205,17 +1345,15 @@ function EntryTab({
         <div>
           <label className="text-xs mb-1 block" style={{ color: T.muted }}>Danh mục</label>
           {!addingNewCategory ? (
-            <select
+            <SelectWithDelete
               value={form.category}
-              onChange={(e) => {
-                if (e.target.value === NEW_OPTION) { setAddingNewCategory(true); return; }
-                setForm((f) => ({ ...f, category: e.target.value, subcategory: "" }));
-              }}
-              className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none" style={inputStyle}>
-              <option value="">— Chọn danh mục —</option>
-              {activeCategories.map((c) => (<option key={c.name} value={c.name}>{c.name}</option>))}
-              {form.type === "income" && <option value={NEW_OPTION}>+ Thêm danh mục mới</option>}
-            </select>
+              onChange={(v) => setForm((f) => ({ ...f, category: v, subcategory: "" }))}
+              options={activeCategories.map((c) => ({ value: c.name, label: c.name }))}
+              placeholder="— Chọn danh mục —"
+              onDeleteOption={onDeleteCategory ? handleDeleteCategory : undefined}
+              deleteTitle="Xoá danh mục này"
+              onAddNew={form.type === "income" ? () => setAddingNewCategory(true) : undefined}
+            />
           ) : (
             <div className="flex gap-2">
               <input autoFocus value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)}
@@ -1234,21 +1372,16 @@ function EntryTab({
         <div>
           <label className="text-xs mb-1 block" style={{ color: T.muted }}>Chi tiết</label>
           {!addingNewSub ? (
-            <div className="space-y-2">
-              <select
-                value={form.subcategory}
-                disabled={!form.category}
-                onChange={(e) => {
-                  if (e.target.value === NEW_OPTION) { setAddingNewSub(true); return; }
-                  setForm((f) => ({ ...f, subcategory: e.target.value }));
-                }}
-                className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none disabled:opacity-50"
-                style={inputStyle}>
-                <option value="">{form.category ? "— Chọn chi tiết (không bắt buộc) —" : "— Chọn danh mục trước —"}</option>
-                {subOptions.map((s) => (<option key={s} value={s}>{s}</option>))}
-                {form.category && <option value={NEW_OPTION}>+ Thêm danh mục mới</option>}
-              </select>
-            </div>
+            <SelectWithDelete
+              value={form.subcategory}
+              disabled={!form.category}
+              onChange={(v) => setForm((f) => ({ ...f, subcategory: v }))}
+              options={subOptions.map((s) => ({ value: s, label: s }))}
+              placeholder={form.category ? "— Chọn chi tiết (không bắt buộc) —" : "— Chọn danh mục trước —"}
+              onDeleteOption={onDeleteSubcategory ? handleDeleteSubcategory : undefined}
+              deleteTitle="Xoá chi tiết này"
+              onAddNew={form.category ? () => setAddingNewSub(true) : undefined}
+            />
           ) : (
             <div className="flex gap-2">
               <input autoFocus value={newSubName} onChange={(e) => setNewSubName(e.target.value)}
@@ -1746,6 +1879,32 @@ export default function App() {
     if (error) setLoadError(error.message);
   };
 
+  // Xoá hẳn 1 danh mục (kéo theo mọi "chi tiết" con của nó, nhờ ràng buộc "on delete cascade"
+  // trong schema.sql) — chỉ xoá khỏi danh sách để chọn, KHÔNG đụng tới các khoản thu/chi đã
+  // ghi trước đó (fin_transactions lưu tên bằng text, không phải khoá ngoại tới fin_categories).
+  const deleteCategory = async (type, name) => {
+    const cat = categories[type].find((c) => c.name === name);
+    if (!cat) return;
+    setCategories((prev) => ({ ...prev, [type]: prev[type].filter((c) => c.name !== name) }));
+    if (!supabase || !cat.id) return;
+    const { error } = await supabase.from("fin_categories").delete().eq("id", cat.id);
+    if (error) setLoadError(error.message);
+  };
+
+  // Xoá 1 "chi tiết" (subcategory) con trong 1 danh mục — cũng không đụng tới các khoản
+  // thu/chi đã ghi trước đó.
+  const deleteSubcategory = async (type, categoryName, subName) => {
+    const cat = categories[type].find((c) => c.name === categoryName);
+    if (!cat) return;
+    setCategories((prev) => ({
+      ...prev,
+      [type]: prev[type].map((c) => (c.name === categoryName ? { ...c, subs: c.subs.filter((s) => s !== subName) } : c)),
+    }));
+    if (!supabase || !cat.id) return;
+    const { error } = await supabase.from("fin_subcategories").delete().eq("category_id", cat.id).eq("name", subName);
+    if (error) setLoadError(error.message);
+  };
+
   const upsertBudget = async (budgetMonth, category, amount) => {
     setBudgets((prev) => {
       const cur = prev[budgetMonth] || { total: null, categories: {} };
@@ -1827,6 +1986,7 @@ export default function App() {
           viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts}
           onAddTransaction={addTransaction} onUpdateTransaction={updateTransaction} onDeleteTransaction={deleteTransaction}
           onAddIncomeCategory={addIncomeCategory} onAddSubcategory={addSubcategory}
+          onDeleteCategory={deleteCategory} onDeleteSubcategory={deleteSubcategory}
           walletBalances={walletBalances} walletTransfers={walletTransfers}
           onAddWalletTransfer={addWalletTransfer} onDeleteWalletTransfer={deleteWalletTransfer}
         />
