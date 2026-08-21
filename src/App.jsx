@@ -278,7 +278,7 @@ function AmountVisibilityToggle({ hidden, onChange, full = false }) {
 }
 
 // ---------- Tab 1: Overview ----------
-function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "web", walletBalances }) {
+function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "web", walletBalances, isActive = true }) {
   const mobile = viewMode === "app";
   // Kích thước chữ / góc nghiêng trục biểu đồ co giãn theo giao diện đang xem: ở "app"
   // (màn hình hẹp) chữ cần nhỏ hơn và nhãn trục X cần nghiêng nhiều hơn để không bị chật/đè chữ.
@@ -321,17 +321,35 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
     return list;
   }, [mb, totalIncome]);
 
-  // Xếp hạng theo danh mục chi tiết (lv1 - lv2), khoản nào dùng nhiều nhất
-  const bySubCategory = useMemo(() => {
+  // Xếp hạng danh mục chi tiêu — dạng PHÂN CẤP: cấp 1 là danh mục (tổng toàn bộ chi tiêu
+  // của danh mục đó), bấm vào để mở rộng xem cấp 2 (từng chi tiết bên trong danh mục đó).
+  // Cả 2 cấp đều được sắp xếp giảm dần theo số tiền.
+  const byCategoryDrill = useMemo(() => {
     const map = {};
     txMonth.filter((t) => t.type === "expense").forEach((t) => {
+      if (!map[t.category]) map[t.category] = { name: t.category, value: 0, color: colorFor(t.category), subs: {} };
+      map[t.category].value += t.amount;
       const sub = t.subcategory || "Khác";
-      const key = t.category + " · " + sub;
-      if (!map[key]) map[key] = { key, category: t.category, subcategory: sub, value: 0, color: colorFor(t.category) };
-      map[key].value += t.amount;
+      map[t.category].subs[sub] = (map[t.category].subs[sub] || 0) + t.amount;
     });
-    return Object.values(map).sort((a, b) => b.value - a.value);
+    return Object.values(map)
+      .map((c) => ({
+        ...c,
+        subs: Object.entries(c.subs)
+          .map(([name, value]) => ({ name, value }))
+          .sort((a, b) => b.value - a.value),
+      }))
+      .sort((a, b) => b.value - a.value);
   }, [txMonth]);
+  const [expandedRankCats, setExpandedRankCats] = useState(() => new Set());
+  const toggleRankCat = (name) =>
+    setExpandedRankCats((prev) => {
+      const next = new Set(prev);
+      next.has(name) ? next.delete(name) : next.add(name);
+      return next;
+    });
+  // Khi đổi tháng, thu gọn lại từ đầu — tránh giữ trạng thái mở rộng của danh mục thuộc tháng cũ.
+  useEffect(() => { setExpandedRankCats(new Set()); }, [month]);
 
   // So sánh hạn mức ngân sách với số tiền đã chi thực tế, theo từng danh mục đã đặt hạn mức
   const budgetVsActual = useMemo(() => {
@@ -383,11 +401,29 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
     const el = pieCardRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) setPieCardHeight(entry.target.offsetHeight);
+      for (const entry of entries) {
+        // Khi tab này bị ẩn bằng display:none (chuyển sang tab khác nhưng vẫn giữ mounted),
+        // trình duyệt báo chiều cao = 0 — bỏ qua giá trị 0 này, chỉ giữ lại chiều cao THẬT
+        // gần nhất đã đo được, để khi quay lại tab "Tổng quan" không bị "quên" mất chiều cao
+        // cũ trong khoảnh khắc trước khi layout mới kịp đo lại.
+        const h = entry.target.offsetHeight;
+        if (h > 0) setPieCardHeight(h);
+      }
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // Khi tab "Tổng quan" chuyển từ ẩn (display:none) sang hiện lại, chủ động đo lại ngay
+  // (thay vì chỉ trông chờ ResizeObserver, vốn có thể không bắn sự kiện kịp thời trên một số
+  // trình duyệt/khung web) — đây chính là điểm khắc phục lỗi "quay lại tab Tổng quan bị tràn
+  // danh sách xếp hạng" từng chỉ được sửa ở giao diện "app" mà chưa sửa ở giao diện web.
+  useEffect(() => {
+    if (!isActive) return;
+    const raf = requestAnimationFrame(() => {
+      if (pieCardRef.current) setPieCardHeight(pieCardRef.current.offsetHeight);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [isActive]);
 
   return (
     <div className="space-y-5">
@@ -540,30 +576,66 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
           className="rounded-2xl bg-white p-4 flex flex-col"
           style={pieCardHeight ? { height: pieCardHeight } : undefined}
         >
-          <h3 className="text-sm font-medium mb-3" style={{ color: T.ink }}>Xếp hạng danh mục chi tiêu</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium" style={{ color: T.ink }}>Xếp hạng danh mục chi tiêu</h3>
+            {byCategoryDrill.length > 0 && (
+              <button
+                type="button"
+                onClick={() =>
+                  setExpandedRankCats((prev) =>
+                    prev.size === byCategoryDrill.length ? new Set() : new Set(byCategoryDrill.map((c) => c.name))
+                  )
+                }
+                className="text-xs font-medium shrink-0"
+                style={{ color: T.green }}
+              >
+                {expandedRankCats.size === byCategoryDrill.length ? "Thu gọn tất cả" : "Mở rộng tất cả"}
+              </button>
+            )}
+          </div>
           <div
-            className="flex flex-col gap-3 overflow-y-auto pr-1 flex-1"
-            style={{ minHeight: 0, justifyContent: bySubCategory.length > 0 ? "space-between" : "flex-start" }}
+            className="flex flex-col gap-4 overflow-y-auto pr-1 flex-1"
+            style={{ minHeight: 0, justifyContent: byCategoryDrill.length > 0 ? "flex-start" : "flex-start" }}
           >
-            {bySubCategory.map((c) => {
+            {byCategoryDrill.map((c) => {
               const pct = totalExpense ? Math.round((c.value / totalExpense) * 100) : 0;
+              const isOpen = expandedRankCats.has(c.name);
               return (
-                <div key={c.key}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: c.color }} />
-                    <span className="text-sm flex-1 truncate" style={{ color: T.ink }}>
-                      {c.category} <span style={{ color: T.muted }}>· {c.subcategory}</span>
-                    </span>
-                    <span className="text-xs font-medium shrink-0" style={{ color: T.muted }}>{pct}%</span>
-                    <span className="text-sm font-medium shrink-0" style={{ color: T.ink }}>{mfmt(c.value, hideAmounts)}</span>
-                  </div>
-                  <div className="h-2 rounded-full overflow-hidden" style={{ background: T.page }}>
-                    <div className="h-full rounded-full" style={{ width: `${pct}%`, background: c.color }} />
-                  </div>
+                <div key={c.name}>
+                  <button type="button" onClick={() => toggleRankCat(c.name)} className="w-full text-left">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      {isOpen ? <ChevronDown size={13} style={{ color: T.muted, flexShrink: 0 }} /> : <ChevronRight size={13} style={{ color: T.muted, flexShrink: 0 }} />}
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: c.color }} />
+                      <span className="text-sm flex-1 truncate font-medium" style={{ color: T.ink }}>{c.name}</span>
+                      <span className="text-xs font-medium shrink-0" style={{ color: T.muted }}>{pct}%</span>
+                      <span className="text-sm font-medium shrink-0" style={{ color: T.ink }}>{mfmt(c.value, hideAmounts)}</span>
+                    </div>
+                    <div className="h-2 rounded-full overflow-hidden" style={{ background: T.page }}>
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: c.color }} />
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="mt-3 pl-4 space-y-3" style={{ borderLeft: `2px solid ${T.border}` }}>
+                      {c.subs.map((s) => {
+                        const subPct = c.value ? Math.round((s.value / c.value) * 100) : 0;
+                        return (
+                          <div key={s.name} className="pl-3">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="text-xs flex-1 truncate" style={{ color: T.muted }}>{s.name}</span>
+                              <span className="text-xs font-medium shrink-0" style={{ color: T.ink }}>{mfmt(s.value, hideAmounts)}</span>
+                            </div>
+                            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: T.page }}>
+                              <div className="h-full rounded-full" style={{ width: `${subPct}%`, background: c.color, opacity: 0.55 }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
-            {bySubCategory.length === 0 && <p className="text-sm" style={{ color: T.muted }}>Chưa có dữ liệu.</p>}
+            {byCategoryDrill.length === 0 && <p className="text-sm" style={{ color: T.muted }}>Chưa có dữ liệu.</p>}
           </div>
         </div>
       </div>
@@ -1976,7 +2048,7 @@ export default function App() {
           ở tab "Tổng quan" bị khởi tạo lại từ đầu mỗi lần quay lại tab đó, có lúc lỡ nhịp đo và
           hiện bảng xếp hạng dài tràn lan cho tới khi tải lại cả trang mới hết. */}
       <div style={{ display: tab === "overview" ? "block" : "none" }}>
-        <OverviewTab transactions={transactions} month={month} budgets={budgets} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} />
+        <OverviewTab transactions={transactions} month={month} budgets={budgets} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} isActive={tab === "overview"} />
       </div>
       <div style={{ display: tab === "flow" ? "block" : "none" }}>
         <CashFlowTab transactions={transactions} month={month} budgets={budgets} viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts} />
