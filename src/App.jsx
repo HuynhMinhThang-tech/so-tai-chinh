@@ -277,6 +277,46 @@ function AmountVisibilityToggle({ hidden, onChange, full = false }) {
   );
 }
 
+// Panel xác nhận xoá dùng chung cho cả app — thay cho window.confirm() mặc định của trình
+// duyệt (kiểu hộp thoại "localhost:xxxx says...") bằng một modal đồng bộ giao diện với app.
+function ConfirmModal({ open, title = "Xác nhận xoá", message, confirmLabel = "Xoá", cancelLabel = "Hủy", onConfirm, onCancel }) {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(32,38,31,0.45)" }}
+      onClick={onCancel}
+    >
+      <div
+        className="rounded-2xl bg-white p-5 w-full max-w-sm"
+        style={{ boxShadow: "0 16px 40px rgba(32,38,31,0.25)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-sm font-semibold mb-2 ff-serif" style={{ color: T.ink, fontSize: 16 }}>{title}</h3>
+        <p className="text-sm mb-5 leading-relaxed" style={{ color: T.muted }}>{message}</p>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg border px-3.5 py-2 text-sm font-medium"
+            style={{ borderColor: T.border, color: T.muted, background: T.card }}
+          >
+            {cancelLabel}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-lg px-3.5 py-2 text-sm font-medium text-white"
+            style={{ background: T.rust }}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Tab 1: Overview ----------
 function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "web", walletBalances, isActive = true }) {
   const mobile = viewMode === "app";
@@ -284,6 +324,9 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
   // (màn hình hẹp) chữ cần nhỏ hơn và nhãn trục X cần nghiêng nhiều hơn để không bị chật/đè chữ.
   const chartUI = {
     axisFont: mobile ? 9 : 11,
+    // Nhãn tên danh mục ở trục X của biểu đồ "Ngân sách so với thực chi" — nhỏ hơn axisFont
+    // thường một chút, vì tên danh mục (VD: "Cho ba má, bà ngoại, bé Ngọc") khá dài, dễ bị chật.
+    categoryAxisFont: mobile ? 8 : 9.5,
     legendFont: mobile ? 10 : 12,
     labelFont: mobile ? 9 : 11,
     pctFont: mobile ? 10 : 12,
@@ -661,7 +704,7 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
             <ResponsiveContainer>
               <BarChart data={budgetVsActual} margin={{ top: 10, right: 8, left: -4, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
-                <XAxis dataKey="name" tick={{ fontSize: chartUI.axisFont, fill: T.muted }} interval={0} angle={chartUI.xAngle} textAnchor="end" height={chartUI.xHeight} />
+                <XAxis dataKey="name" tick={{ fontSize: chartUI.categoryAxisFont, fill: T.muted }} interval={0} angle={chartUI.xAngle} textAnchor="end" height={chartUI.xHeight} />
                 <YAxis width={34} domain={[0, budgetChartMax]} tick={{ fontSize: chartUI.axisFont, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
                 <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
                 <Legend wrapperStyle={{ fontSize: chartUI.legendFont, color: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
@@ -946,7 +989,7 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
 }
 
 // ---------- Tab: Budget (lập ngân sách) ----------
-function BudgetTab({ budgets, month, categories, transactions, hideAmounts, viewMode = "web", onAddExpenseCategory, onUpsertBudget, onDeleteBudget }) {
+function BudgetTab({ budgets, month, categories, transactions, hideAmounts, viewMode = "web", onAddExpenseCategory, onUpsertBudget, onDeleteBudget, onDeleteCategory }) {
   const mobile = viewMode === "app";
   // Tab này có bộ chọn tháng RIÊNG, tách biệt với bộ lọc tháng chung của toàn app,
   // để có thể lập ngân sách trước cho tháng sau mà không ảnh hưởng tháng đang xem ở các tab khác.
@@ -1020,6 +1063,26 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
     if (editingCat === name) cancelEditCat();
   };
 
+  // Xoá hẳn 1 danh mục chi tiêu ngay từ trong dropdown chọn danh mục (dấu X) — cùng kiểu thao
+  // tác với tab "Ghi chép thu chi". Nếu danh mục đó đang có hạn mức ngân sách cho tháng này,
+  // xoá luôn dòng ngân sách đó trước (tránh để lại ngân sách "mồ côi" không còn danh mục).
+  // Các khoản thu/chi đã ghi trước đó KHÔNG bị ảnh hưởng — chỉ là tên đó không còn để chọn nữa.
+  // Dùng panel xác nhận riêng của app (ConfirmModal) thay vì window.confirm() của trình duyệt.
+  const [confirmDeleteCat, setConfirmDeleteCat] = useState(null);
+  const handleDeleteCategory = (name) => {
+    if (!onDeleteCategory) return;
+    setConfirmDeleteCat(name);
+  };
+  const performDeleteCategory = async () => {
+    const name = confirmDeleteCat;
+    setConfirmDeleteCat(null);
+    if (!name) return;
+    if (mb.categories[name] != null) await onDeleteBudget(budgetMonth, name);
+    await onDeleteCategory("expense", name);
+    if (catForm.category === name) setCatForm((f) => ({ ...f, category: "" }));
+    if (editingCat === name) cancelEditCat();
+  };
+
   return (
     <div className="space-y-5">
       <div className="rounded-2xl bg-white p-5">
@@ -1059,16 +1122,15 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
           <div className={mobile ? "w-full" : "flex-1 min-w-[160px]"}>
             <label className="text-xs mb-1 block" style={{ color: T.muted }}>Danh mục</label>
             {!addingNewCat ? (
-              <select value={catForm.category}
-                onChange={(e) => {
-                  if (e.target.value === NEW_OPTION) { setAddingNewCat(true); return; }
-                  setCatForm((f) => ({ ...f, category: e.target.value }));
-                }}
-                className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none disabled:opacity-60" style={inputStyle}>
-                <option value="">— Chọn danh mục —</option>
-                {availableCats.map((n) => (<option key={n} value={n}>{n}</option>))}
-                <option value={NEW_OPTION}>+ Thêm danh mục mới</option>
-              </select>
+              <SelectWithDelete
+                value={catForm.category}
+                onChange={(v) => setCatForm((f) => ({ ...f, category: v }))}
+                options={availableCats.map((n) => ({ value: n, label: n }))}
+                placeholder="— Chọn danh mục —"
+                onDeleteOption={onDeleteCategory ? handleDeleteCategory : undefined}
+                deleteTitle="Xoá danh mục này"
+                onAddNew={() => setAddingNewCat(true)}
+              />
             ) : (
               <div className="flex gap-2">
                 <input autoFocus value={newCatName} onChange={(e) => setNewCatName(e.target.value)}
@@ -1146,6 +1208,14 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
           })}
         </div>
       </div>
+
+      <ConfirmModal
+        open={!!confirmDeleteCat}
+        title="Xoá danh mục"
+        message={`Xoá danh mục "${confirmDeleteCat}"? Các khoản đã ghi trước đó sẽ không bị ảnh hưởng, chỉ là danh mục này sẽ không còn để chọn nữa.`}
+        onConfirm={performDeleteCategory}
+        onCancel={() => setConfirmDeleteCat(null)}
+      />
     </div>
   );
 }
@@ -1331,17 +1401,28 @@ function EntryTab({
   // Xoá 1 danh mục / chi tiết ngay từ trong dropdown — vì danh sách càng ngày càng dài.
   // Có hỏi xác nhận trước vì đây là thao tác không thể hoàn tác (các khoản đã ghi trước đó
   // vẫn giữ nguyên, không bị xoá theo — chỉ là tên đó không còn xuất hiện để chọn nữa).
-  const handleDeleteCategory = async (name) => {
+  // Dùng chung 1 panel xác nhận (ConfirmModal) cho cả 2 trường hợp danh mục / chi tiết, thay
+  // vì window.confirm() mặc định của trình duyệt.
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState(null); // { kind: "category" | "subcategory", name } | null
+  const handleDeleteCategory = (name) => {
     if (!onDeleteCategory) return;
-    if (!window.confirm(`Xoá danh mục "${name}"? Các khoản đã ghi trước đó sẽ không bị ảnh hưởng, chỉ là danh mục này sẽ không còn để chọn nữa.`)) return;
-    await onDeleteCategory(form.type, name);
-    if (form.category === name) setForm((f) => ({ ...f, category: "", subcategory: "" }));
+    setConfirmDeleteItem({ kind: "category", name });
   };
-  const handleDeleteSubcategory = async (name) => {
+  const handleDeleteSubcategory = (name) => {
     if (!onDeleteSubcategory || !form.category) return;
-    if (!window.confirm(`Xoá chi tiết "${name}"? Các khoản đã ghi trước đó sẽ không bị ảnh hưởng.`)) return;
-    await onDeleteSubcategory(form.type, form.category, name);
-    if (form.subcategory === name) setForm((f) => ({ ...f, subcategory: "" }));
+    setConfirmDeleteItem({ kind: "subcategory", name });
+  };
+  const performConfirmedDelete = async () => {
+    const item = confirmDeleteItem;
+    setConfirmDeleteItem(null);
+    if (!item) return;
+    if (item.kind === "category") {
+      await onDeleteCategory(form.type, item.name);
+      if (form.category === item.name) setForm((f) => ({ ...f, category: "", subcategory: "" }));
+    } else {
+      await onDeleteSubcategory(form.type, form.category, item.name);
+      if (form.subcategory === item.name) setForm((f) => ({ ...f, subcategory: "" }));
+    }
   };
 
   const submit = async (e) => {
@@ -1611,6 +1692,18 @@ function EntryTab({
 
       <WalletTransferHistory walletTransfers={walletTransfers} onDeleteWalletTransfer={onDeleteWalletTransfer} hideAmounts={hideAmounts} mobile={mobile} />
       </div>
+
+      <ConfirmModal
+        open={!!confirmDeleteItem}
+        title={confirmDeleteItem?.kind === "subcategory" ? "Xoá chi tiết" : "Xoá danh mục"}
+        message={
+          confirmDeleteItem?.kind === "subcategory"
+            ? `Xoá chi tiết "${confirmDeleteItem?.name}"? Các khoản đã ghi trước đó sẽ không bị ảnh hưởng.`
+            : `Xoá danh mục "${confirmDeleteItem?.name}"? Các khoản đã ghi trước đó sẽ không bị ảnh hưởng, chỉ là danh mục này sẽ không còn để chọn nữa.`
+        }
+        onConfirm={performConfirmedDelete}
+        onCancel={() => setConfirmDeleteItem(null)}
+      />
     </div>
   );
 }
@@ -2058,6 +2151,7 @@ export default function App() {
           budgets={budgets} month={month} categories={categories} transactions={transactions} hideAmounts={hideAmounts}
           viewMode={viewMode === "app" ? "app" : "web"}
           onAddExpenseCategory={addExpenseCategory} onUpsertBudget={upsertBudget} onDeleteBudget={deleteBudget}
+          onDeleteCategory={deleteCategory}
         />
       </div>
       <div style={{ display: tab === "entry" ? "block" : "none" }}>
