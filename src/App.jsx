@@ -7,7 +7,7 @@ import {
 import {
   Wallet, TrendingUp, TrendingDown, PiggyBank, ChevronDown, ChevronRight,
   Plus, Pencil, Trash2, LayoutGrid, GitBranch, NotebookPen, X, Check,
-  Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, ArrowLeftRight, AlertTriangle,
+  Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, ArrowLeftRight, AlertTriangle, Search,
 } from "lucide-react";
 
 // ---------- Theme: DÙNG CHUNG bảng màu & font với app "Việc Của Tôi" ----------
@@ -1326,6 +1326,7 @@ function EntryTab({
   const [logDateFrom, setLogDateFrom] = useState("");
   const [logDateTo, setLogDateTo] = useState("");
   const [logTypeFilter, setLogTypeFilter] = useState("all"); // "all" | "income" | "expense"
+  const [logSearch, setLogSearch] = useState("");
 
   // Bấm "Sửa" trên một khoản ghi (thường nằm phía dưới, sau khi đã cuộn xuống xem nhật ký)
   // sẽ tự cuộn màn hình lên tới đúng form chỉnh sửa ở trên — khỏi phải tự kéo lên lại.
@@ -1336,16 +1337,35 @@ function EntryTab({
 
   const txMonth = useMemo(() => transactions.filter((t) => t.date.startsWith(month)).sort((a, b) => b.date.localeCompare(a.date)), [transactions, month]);
   const logFilterMaxDate = useMemo(() => { const end = monthEnd(month); const today = todayISO(); return end < today ? end : today; }, [month]);
-  useEffect(() => { setLogDateFrom(""); setLogDateTo(""); }, [month]);
+  useEffect(() => { setLogDateFrom(""); setLogDateTo(""); setLogSearch(""); }, [month]);
+  // Chuẩn hoá chuỗi để tìm kiếm không phân biệt hoa/thường và không phân biệt dấu tiếng Việt
+  // (VD: gõ "ca phe" vẫn tìm ra "Cà phê").
+  const normalizeSearch = (s) =>
+    (s || "")
+      .toString()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d");
+  const logSearchTrimmed = logSearch.trim();
+  const logSearchNormalized = normalizeSearch(logSearchTrimmed);
+  const logSearchDigits = logSearchTrimmed.replace(/\D/g, "");
   const filteredLogTx = useMemo(
     () =>
-      txMonth.filter(
-        (t) =>
-          (!logDateFrom || t.date >= logDateFrom) &&
-          (!logDateTo || t.date <= logDateTo) &&
-          (logTypeFilter === "all" || t.type === logTypeFilter)
-      ),
-    [txMonth, logDateFrom, logDateTo, logTypeFilter]
+      txMonth.filter((t) => {
+        if (!((!logDateFrom || t.date >= logDateFrom) && (!logDateTo || t.date <= logDateTo) && (logTypeFilter === "all" || t.type === logTypeFilter))) {
+          return false;
+        }
+        if (!logSearchNormalized) return true;
+        // Tìm theo từ khoá của danh mục (lv1) hoặc chi tiết (lv2)
+        const textMatch =
+          normalizeSearch(t.category).includes(logSearchNormalized) ||
+          normalizeSearch(t.subcategory || "").includes(logSearchNormalized);
+        // Tìm theo số tiền — chỉ áp dụng khi từ khoá có chứa chữ số
+        const amountMatch = logSearchDigits.length > 0 && String(t.amount).includes(logSearchDigits);
+        return textMatch || amountMatch;
+      }),
+    [txMonth, logDateFrom, logDateTo, logTypeFilter, logSearchNormalized, logSearchDigits]
   );
   const txByDay = useMemo(() => {
     const groups = [];
@@ -1587,6 +1607,28 @@ function EntryTab({
       <div className="rounded-2xl bg-white overflow-hidden">
         <div className="p-4" style={{ borderBottom: `1px solid ${T.border}` }}>
           <h3 className="text-sm font-medium mb-3" style={{ color: T.ink }}>Nhật ký {monthLabel(month)}</h3>
+          <div className="relative mb-2.5">
+            <Search size={14} style={{ color: T.muted, position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+            <input
+              type="text"
+              value={logSearch}
+              onChange={(e) => setLogSearch(e.target.value)}
+              placeholder="Tìm theo danh mục, chi tiết hoặc số tiền..."
+              className="w-full rounded-lg border pl-8 pr-8 py-2 text-sm focus:outline-none"
+              style={{ borderColor: T.border, color: T.ink, background: T.card }}
+            />
+            {logSearch && (
+              <button
+                type="button"
+                onClick={() => setLogSearch("")}
+                aria-label="Xoá tìm kiếm"
+                className="absolute"
+                style={{ right: 8, top: "50%", transform: "translateY(-50%)", color: T.muted }}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
           <div className={`flex gap-2 ${mobile ? "flex-col" : "items-center justify-between flex-wrap"}`}>
             <div className={`inline-flex rounded-full p-0.5 gap-0.5 ${mobile ? "w-full" : ""}`} style={{ background: "#E4E7DC" }}>
               {[
@@ -1634,7 +1676,11 @@ function EntryTab({
         </div>
         {viewMode === "app" ? (
           <div className="p-3 space-y-4">
-            {txByDay.length === 0 && <p className="text-sm text-center py-10" style={{ color: T.muted }}>Chưa có khoản ghi nào trong khoảng thời gian này.</p>}
+            {txByDay.length === 0 && (
+              <p className="text-sm text-center py-10" style={{ color: T.muted }}>
+                {logSearchTrimmed ? "Không tìm thấy khoản ghi nào phù hợp." : "Chưa có khoản ghi nào trong khoảng thời gian này."}
+              </p>
+            )}
             {txByDay.map((g) => (
               <div key={g.date}>
                 <div className="flex items-center justify-between px-1 mb-2">
@@ -1668,7 +1714,11 @@ function EntryTab({
           </div>
         ) : (
           <div className="max-h-[560px] overflow-y-auto">
-            {filteredLogTx.length === 0 && <p className="text-sm text-center py-10" style={{ color: T.muted }}>Chưa có khoản ghi nào trong khoảng thời gian này.</p>}
+            {filteredLogTx.length === 0 && (
+              <p className="text-sm text-center py-10" style={{ color: T.muted }}>
+                {logSearchTrimmed ? "Không tìm thấy khoản ghi nào phù hợp." : "Chưa có khoản ghi nào trong khoảng thời gian này."}
+              </p>
+            )}
             {filteredLogTx.map((t) => (
               <div key={t.id} className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${T.border}` }}>
                 <span className="w-1.5 h-8 rounded-full shrink-0" style={{ background: t.type === "income" ? T.green : T.rust }} />
@@ -1864,9 +1914,6 @@ function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMod
             >
               <Icon size={16} strokeWidth={2.3} style={{ color: active ? T.green : T.muted }} />
               {t.label}
-              {t.id === "entry" && txCountThisMonth > 0 && (
-                <span className="ff-mono" style={{ marginLeft: "auto", fontSize: 10.5, color: T.muted }}>{txCountThisMonth}</span>
-              )}
             </button>
           );
         })}
