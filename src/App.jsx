@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import React, { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
@@ -132,6 +132,16 @@ function isRealMobileDevice() {
 }
 
 const THIS_MONTH = currentMonth();
+
+// ---- Kích thước dùng để căn chỉnh 2 cột trong tab "Ghi chép thu chi" (chỉ áp dụng bản web) ----
+// Giá trị TẠM dùng cho thẻ "Lịch sử chuyển đổi" trong lúc chưa đo được chiều cao thật (render
+// lần đầu) — chiều cao THẬT SỰ sau đó được đo trực tiếp từ DOM (vừa khít 5 dòng), xem WalletTransferHistory.
+const WALLET_HISTORY_FALLBACK_HEIGHT = 200;
+// Khoảng cách dọc giữa 2 thẻ trong 1 cột (khớp với class "space-y-4" = 1rem = 16px).
+const COLUMN_GAP = 16;
+// Chiều cao TỐI ĐA của danh sách giao dịch trong "Nhật ký" ở bản app — vượt quá chiều cao này thì
+// tự cuộn bên trong thẻ, thay vì hiển thị hết và đẩy dài cả trang.
+const MOBILE_JOURNAL_MAX_HEIGHT = 480;
 
 // ---------- Supabase client (cùng cách cấu hình với app "Việc Của Tôi") ----------
 // PHẢI đặt 2 biến môi trường sau trong .env (Vite) hoặc Environment Variables của Vercel:
@@ -1328,6 +1338,40 @@ function EntryTab({
   const [logTypeFilter, setLogTypeFilter] = useState("all"); // "all" | "income" | "expense"
   const [logSearch, setLogSearch] = useState("");
 
+  // ---- Căn chiều cao cột phải (Nhật ký + Lịch sử chuyển đổi) khớp với cột trái (Form + Chuyển
+  // đổi ví), CHỈ áp dụng cho bản web. Đo chiều cao thật của cột trái (leftColRef), phần tiêu đề
+  // + bộ lọc cố định phía trên nhật ký (journalHeaderRef), và chiều cao THẬT của thẻ "Lịch sử
+  // chuyển đổi" (historyCardRef — thẻ này tự đo và khoá chiều cao vừa khít 5 dòng, xem
+  // WalletTransferHistory) bằng ResizeObserver, rồi suy ra chiều cao còn lại dành cho vùng cuộn
+  // của nhật ký, sao cho: journalHeader + journalScroll + GAP + chiều cao thẻ lịch sử = chiều cao
+  // cột trái — tức là cạnh dưới của "Lịch sử chuyển đổi" luôn ngang bằng cạnh dưới của cột trái.
+  const leftColRef = useRef(null);
+  const journalHeaderRef = useRef(null);
+  const historyCardRef = useRef(null);
+  const [journalListHeight, setJournalListHeight] = useState(null);
+  useEffect(() => {
+    if (mobile) return; // bản app: không chỉnh gì, giữ nguyên hành vi cũ
+    if (typeof ResizeObserver === "undefined") return;
+    const leftEl = leftColRef.current;
+    const headerEl = journalHeaderRef.current;
+    if (!leftEl || !headerEl) return;
+    const recompute = () => {
+      const leftHeight = leftEl.offsetHeight;
+      const headerHeight = headerEl.offsetHeight;
+      const historyHeight = historyCardRef.current?.offsetHeight || WALLET_HISTORY_FALLBACK_HEIGHT;
+      if (leftHeight > 0) {
+        const available = leftHeight - headerHeight - COLUMN_GAP - historyHeight;
+        setJournalListHeight(Math.max(available, 160));
+      }
+    };
+    const ro = new ResizeObserver(recompute);
+    ro.observe(leftEl);
+    ro.observe(headerEl);
+    if (historyCardRef.current) ro.observe(historyCardRef.current);
+    recompute();
+    return () => ro.disconnect();
+  }, [mobile]);
+
   // Bấm "Sửa" trên một khoản ghi (thường nằm phía dưới, sau khi đã cuộn xuống xem nhật ký)
   // sẽ tự cuộn màn hình lên tới đúng form chỉnh sửa ở trên — khỏi phải tự kéo lên lại.
   const entryFormRef = useRef(null);
@@ -1480,8 +1524,8 @@ function EntryTab({
   };
 
   return (
-    <div className={`grid gap-5 ${mobile ? "grid-cols-1" : "grid-cols-5"}`}>
-      <div className={mobile ? "space-y-4" : "col-span-2 space-y-4"}>
+    <div className={`grid gap-5 items-start ${mobile ? "grid-cols-1" : "grid-cols-5"}`}>
+      <div ref={leftColRef} className={mobile ? "space-y-4" : "col-span-2 space-y-4"}>
       <form onSubmit={submit} ref={entryFormRef} className="rounded-2xl bg-white p-5 h-fit space-y-4">
         <h3 className="text-sm font-medium" style={{ color: T.ink }}>{editingId ? "Sửa khoản ghi" : "Ghi thu / chi mới"}</h3>
 
@@ -1605,7 +1649,7 @@ function EntryTab({
 
       <div className={mobile ? "space-y-4" : "col-span-3 space-y-4"}>
       <div className="rounded-2xl bg-white overflow-hidden">
-        <div className="p-4" style={{ borderBottom: `1px solid ${T.border}` }}>
+        <div ref={journalHeaderRef} className="p-4" style={{ borderBottom: `1px solid ${T.border}` }}>
           <h3 className="text-sm font-medium mb-3" style={{ color: T.ink }}>Nhật ký {monthLabel(month)}</h3>
           <div className="relative mb-2.5">
             <Search size={14} style={{ color: T.muted, position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
@@ -1675,7 +1719,7 @@ function EntryTab({
           </div>
         </div>
         {viewMode === "app" ? (
-          <div className="p-3 space-y-4">
+          <div className="p-3 space-y-4" style={{ maxHeight: MOBILE_JOURNAL_MAX_HEIGHT, overflowY: "auto" }}>
             {txByDay.length === 0 && (
               <p className="text-sm text-center py-10" style={{ color: T.muted }}>
                 {logSearchTrimmed ? "Không tìm thấy khoản ghi nào phù hợp." : "Chưa có khoản ghi nào trong khoảng thời gian này."}
@@ -1713,7 +1757,7 @@ function EntryTab({
             ))}
           </div>
         ) : (
-          <div className="max-h-[560px] overflow-y-auto">
+          <div style={{ height: journalListHeight || 560, overflowY: "auto" }}>
             {filteredLogTx.length === 0 && (
               <p className="text-sm text-center py-10" style={{ color: T.muted }}>
                 {logSearchTrimmed ? "Không tìm thấy khoản ghi nào phù hợp." : "Chưa có khoản ghi nào trong khoảng thời gian này."}
@@ -1740,7 +1784,7 @@ function EntryTab({
         )}
       </div>
 
-      <WalletTransferHistory walletTransfers={walletTransfers} onDeleteWalletTransfer={onDeleteWalletTransfer} hideAmounts={hideAmounts} mobile={mobile} />
+      <WalletTransferHistory walletTransfers={walletTransfers} onDeleteWalletTransfer={onDeleteWalletTransfer} hideAmounts={hideAmounts} mobile={mobile} containerRef={historyCardRef} />
       </div>
 
       <ConfirmModal
@@ -1848,23 +1892,76 @@ function WalletTransferPanel({ walletBalances, onAddWalletTransfer, hideAmounts,
 }
 
 // Lịch sử các lượt chuyển đổi tiền mặt <-> tài khoản — hiển thị gọn bên dưới nhật ký tháng.
-function WalletTransferHistory({ walletTransfers, onDeleteWalletTransfer, hideAmounts, mobile }) {
+// Trên bản web: chiều cao thẻ này CỐ ĐỊNH (tự đo, vừa khít 5 dòng) — càng chuyển đổi nhiều thì
+// danh sách bên trong tự cuộn dọc, thẻ không phình cao thêm nữa (khớp với cách "Nhật ký" cuộn).
+// Trên bản app: giữ nguyên hành vi cũ (chỉ hiện 8 lượt gần nhất, không cuộn) — không đụng tới.
+function WalletTransferHistory({ walletTransfers, onDeleteWalletTransfer, hideAmounts, mobile, containerRef }) {
+  // Số dòng tối đa hiển thị đủ trước khi phải cuộn — bản app giữ đúng kích thước như hiện tại
+  // (8 dòng), bản web là 5 dòng.
+  const MAX_VISIBLE_ROWS = mobile ? 8 : 5;
+  // Khoảng cách giữa các dòng, khớp với class "space-y-1.5" (0.375rem = 6px).
+  const ROW_GAP = 6;
+  // Padding dưới của thẻ, khớp với class "p-4" (1rem = 16px).
+  const PADDING_BOTTOM = 16;
+
+  const cardRef = useRef(null);
+  const listRef = useRef(null);
+  const rowRef = useRef(null);
+  const [fixedHeight, setFixedHeight] = useState(null);
+
+  // Không cắt bớt dữ liệu nữa — hiển thị TẤT CẢ, thẻ giữ chiều cao cố định (vừa khít
+  // MAX_VISIBLE_ROWS dòng) và tự cuộn bên trong nếu có nhiều lượt chuyển đổi hơn.
+  const recent = walletTransfers || [];
+
+  // Đo trực tiếp trên DOM đã render (tiêu đề + 1 dòng mẫu) để suy ra chiều cao "vừa khít N
+  // dòng" — luôn khớp chính xác với font/kích thước thật đang hiển thị, thay vì đoán một con
+  // số cố định. Chiều cao này sau khi tính xong sẽ được GIỮ CỐ ĐỊNH: nếu có nhiều hơn
+  // MAX_VISIBLE_ROWS lượt chuyển đổi, phần danh sách bên trong tự cuộn thay vì làm thẻ phình
+  // cao thêm (áp dụng cho cả bản web lẫn bản app).
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    const list = listRef.current;
+    const row = rowRef.current;
+    if (!card || !list || !row) return;
+    const recompute = () => {
+      const headerBlockHeight = list.getBoundingClientRect().top - card.getBoundingClientRect().top;
+      const rowHeight = row.getBoundingClientRect().height;
+      if (rowHeight <= 0) return;
+      const target =
+        headerBlockHeight +
+        rowHeight * MAX_VISIBLE_ROWS +
+        ROW_GAP * (MAX_VISIBLE_ROWS - 1) +
+        PADDING_BOTTOM;
+      setFixedHeight(Math.round(target));
+    };
+    recompute();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(recompute);
+    ro.observe(row);
+    ro.observe(card);
+    return () => ro.disconnect();
+  }, [mobile, MAX_VISIBLE_ROWS, recent.length > 0]);
+
   if (!walletTransfers) return null;
-  const recent = walletTransfers.slice(0, 8);
+
   return (
-    <div className="rounded-2xl bg-white p-4">
-      <div className="flex items-center gap-1.5 mb-2.5">
+    <div
+      ref={(el) => { cardRef.current = el; if (containerRef) containerRef.current = el; }}
+      className="rounded-2xl bg-white p-4 flex flex-col"
+      style={{ height: fixedHeight || WALLET_HISTORY_FALLBACK_HEIGHT }}
+    >
+      <div className="flex items-center gap-1.5 mb-2.5 shrink-0">
         <ArrowLeftRight size={13} style={{ color: T.muted }} />
         <h3 className="text-xs font-medium" style={{ color: T.ink }}>Lịch sử chuyển đổi tiền mặt ⇄ tài khoản</h3>
       </div>
       {recent.length === 0 ? (
         <p className="text-xs py-2" style={{ color: T.muted }}>Chưa có lượt chuyển đổi nào.</p>
       ) : (
-        <div className="space-y-1.5">
-          {recent.map((w) => {
+        <div ref={listRef} className="space-y-1.5 flex-1 min-h-0 overflow-y-auto pr-1">
+          {recent.map((w, idx) => {
             const toCash = w.direction === "bank_to_cash";
             return (
-              <div key={w.id} className="flex items-center gap-2 text-xs">
+              <div key={w.id} ref={idx === 0 ? rowRef : undefined} className="flex items-center gap-2 text-xs">
                 <span className="shrink-0" style={{ color: T.muted }}>{w.date}</span>
                 <span className="flex items-center gap-1 flex-1 min-w-0" style={{ color: T.ink }}>
                   {toCash ? <Landmark size={11} style={{ color: T.green }} /> : <Banknote size={11} style={{ color: T.olive }} />}
