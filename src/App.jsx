@@ -350,7 +350,19 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
   const txMonth = useMemo(() => transactions.filter((t) => t.date.startsWith(month)), [transactions, month]);
   const totalIncome = txMonth.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const totalExpense = txMonth.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-  const balance = totalIncome - totalExpense;
+  // KPI "Số dư" hiển thị ở đầu trang: số dư LŨY KẾ (tiền mặt + tài khoản CỘNG DỒN mọi giao dịch
+  // từ trước tới nay) tính đến CUỐI tháng đang lọc — khớp đúng ý nghĩa với 2 ô "Tiền mặt hiện
+  // có" / "Tiền trong tài khoản" bên dưới (vốn cũng là số lũy kế, không reset theo tháng).
+  // Nhờ vậy khi xem một tháng chưa có giao dịch nào (VD tháng tới), KPI này vẫn hiện đúng số
+  // tiền thực tế đang có trong ví — thay vì hiện 0đ gây hiểu lầm là "hết tiền".
+  const cumulativeBalance = useMemo(() => {
+    const cutoff = monthEnd(month); // "YYYY-MM-DD" cuối tháng đang lọc
+    return transactions.reduce((sum, t) => {
+      if (t.date > cutoff) return sum; // bỏ qua giao dịch của các tháng SAU tháng đang xem
+      return sum + (t.type === "income" ? t.amount : -t.amount);
+    }, 0);
+  }, [transactions, month]);
+  const balance = cumulativeBalance;
 
   const mb = budgets[month] || { total: null, categories: {} };
 
@@ -1001,9 +1013,9 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
 // ---------- Tab: Budget (lập ngân sách) ----------
 function BudgetTab({ budgets, month, categories, transactions, hideAmounts, viewMode = "web", onAddExpenseCategory, onUpsertBudget, onDeleteBudget, onDeleteCategory }) {
   const mobile = viewMode === "app";
-  // Tab này có bộ chọn tháng RIÊNG, tách biệt với bộ lọc tháng chung của toàn app,
-  // để có thể lập ngân sách trước cho tháng sau mà không ảnh hưởng tháng đang xem ở các tab khác.
-  const [budgetMonth, setBudgetMonth] = useState(month);
+  // Dùng chung đúng 1 bộ lọc tháng của toàn app (ở sidebar/thanh trên) — không còn bộ chọn
+  // tháng riêng cho tab này nữa, tránh gây rối vì có tới 2 nơi lọc tháng cùng lúc.
+  const budgetMonth = month;
 
   const txMonth = useMemo(() => transactions.filter((t) => t.date.startsWith(budgetMonth)), [transactions, budgetMonth]);
   const totalIncome = useMemo(() => txMonth.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0), [txMonth]);
@@ -1098,7 +1110,6 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
       <div className="rounded-2xl bg-white p-5">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <h3 className="text-sm font-medium" style={{ color: T.ink }}>Ngân sách và chưa phân bổ — {monthLabel(budgetMonth)}</h3>
-          <MonthPicker value={budgetMonth} onChange={setBudgetMonth} className="text-xs px-2 py-1" />
         </div>
 
         <div>
