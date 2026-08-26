@@ -852,7 +852,19 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
       map[t.category].value += t.amount;
       map[t.category].items.push(t);
     });
-    Object.values(map).forEach((c) => c.items.sort((a, b) => a.date.localeCompare(b.date)));
+    Object.values(map).forEach((c) => {
+      c.items.sort((a, b) => a.date.localeCompare(b.date));
+      // Gộp các khoản chi trong cùng danh mục theo NGÀY — bấm vào danh mục sẽ ra danh sách
+      // ngày (gọn hơn nhiều so với liệt kê từng khoản lẻ), bấm tiếp vào 1 ngày mới xem chi
+      // tiết các khoản trong đúng ngày đó.
+      const byDayMap = {};
+      c.items.forEach((it) => {
+        if (!byDayMap[it.date]) byDayMap[it.date] = { date: it.date, items: [], total: 0 };
+        byDayMap[it.date].items.push(it);
+        byDayMap[it.date].total += it.amount;
+      });
+      c.itemsByDay = Object.values(byDayMap).sort((a, b) => a.date.localeCompare(b.date));
+    });
     // Sắp xếp theo hạn mức ngân sách giảm dần trước (ổn định kể cả với danh mục chưa phát sinh chi
     // tiêu nào), rồi mới tới số đã chi cho các danh mục không có ngân sách (phát sinh ngoài kế hoạch).
     const list = Object.values(map).sort((a, b) => {
@@ -865,12 +877,17 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
     });
     // Dòng tiền ra luôn phải bằng dòng tiền vào: phần thu nhập chưa chi tiêu (hoặc chi vượt thu nhập)
     // luôn xuất hiện như một danh mục lv1, và tự động co lại khi bạn ghi thêm chi tiêu.
-    list.push({ name: "Chưa phân bổ", value: unallocated, items: [], isUnallocated: true });
+    list.push({ name: "Chưa phân bổ", value: unallocated, items: [], itemsByDay: [], isUnallocated: true });
     return list;
   }, [txMonth, unallocated, mb]);
 
   const [expanded, setExpanded] = useState(() => new Set());
   const toggle = (name) => setExpanded((prev) => { const next = new Set(prev); next.has(name) ? next.delete(name) : next.add(name); return next; });
+  // Cấp 2: ngày nào đang được mở rộng bên trong 1 danh mục — key dạng "TênDanhMục::YYYY-MM-DD"
+  // để cùng 1 ngày ở 2 danh mục khác nhau không bị đụng trạng thái mở/đóng của nhau.
+  const [expandedDays, setExpandedDays] = useState(() => new Set());
+  const toggleDay = (key) => setExpandedDays((prev) => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
+  useEffect(() => { setExpanded(new Set()); setExpandedDays(new Set()); }, [month]);
 
   if (viewMode === "app") {
     return (
@@ -934,15 +951,34 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
                     </button>
                     {isOpen && (
                       <div className="px-3 pb-2.5 space-y-1.5" style={{ borderTop: `1px solid ${T.border}` }}>
-                        {c.items.length === 0 ? (
+                        {c.itemsByDay.length === 0 ? (
                           <p className="text-xs pt-1.5" style={{ color: T.muted }}>Chưa có khoản chi nào trong danh mục này.</p>
                         ) : (
-                          c.items.map((it) => (
-                            <div key={it.id} className="flex items-center justify-between text-xs pt-1.5">
-                              <span style={{ color: T.muted }}>Ngày {it.date.slice(8, 10)} · {it.subcategory || "—"}</span>
-                              <span style={{ color: T.ink }}>{mfmt(it.amount, hideAmounts)}</span>
-                            </div>
-                          ))
+                          c.itemsByDay.map((day) => {
+                            const dayKey = `${c.name}::${day.date}`;
+                            const dayOpen = expandedDays.has(dayKey);
+                            return (
+                              <div key={day.date} className="pt-1.5">
+                                <button type="button" onClick={() => toggleDay(dayKey)} className="w-full flex items-center justify-between text-xs">
+                                  <span className="flex items-center gap-1" style={{ color: T.muted }}>
+                                    {dayOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                                    Ngày {day.date.slice(8, 10)} · {day.items.length} khoản
+                                  </span>
+                                  <span className="font-medium" style={{ color: T.ink }}>{mfmt(day.total, hideAmounts)}</span>
+                                </button>
+                                {dayOpen && (
+                                  <div className="mt-1.5 pl-4 space-y-1.5" style={{ borderLeft: `2px solid ${T.border}` }}>
+                                    {day.items.map((it) => (
+                                      <div key={it.id} className="flex items-center justify-between text-xs pl-2">
+                                        <span style={{ color: T.muted }}>{it.subcategory || "—"}</span>
+                                        <span style={{ color: T.ink }}>{mfmt(it.amount, hideAmounts)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
                         )}
                       </div>
                     )}
@@ -1038,19 +1074,42 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
 
                       {isOpen && (
                         <div className="mt-3 pl-5 border-l-2 text-left" style={{ borderColor: T.border }}>
-                          {c.items.length === 0 ? (
+                          {c.itemsByDay.length === 0 ? (
                             <p className="text-xs" style={{ color: T.muted }}>Chưa có khoản chi nào trong danh mục này.</p>
                           ) : (
-                            c.items.map((it) => (
-                              <div key={it.id} className="relative pl-5 pt-2 first:pt-0">
-                                <span className="absolute left-[-1px] top-5 w-5 h-px" style={{ background: T.border }} />
-                                <NodeBox className="w-full max-w-xs" style={{ background: T.page }}>
-                                  <p className="text-[11px]" style={{ color: T.muted }}>Ngày {it.date.slice(8, 10)}</p>
-                                  <p className="text-xs font-medium truncate" style={{ color: T.ink }}>{it.subcategory || "—"}</p>
-                                  <p className="text-xs" style={{ color: T.muted }}>{mfmt(it.amount, hideAmounts)}</p>
-                                </NodeBox>
-                              </div>
-                            ))
+                            c.itemsByDay.map((day) => {
+                              const dayKey = `${c.name}::${day.date}`;
+                              const dayOpen = expandedDays.has(dayKey);
+                              return (
+                                <div key={day.date} className="relative pl-5 pt-2 first:pt-0">
+                                  <span className="absolute left-[-1px] top-5 w-5 h-px" style={{ background: T.border }} />
+                                  <button type="button" onClick={() => toggleDay(dayKey)} className="block">
+                                    <NodeBox className="w-full max-w-xs bg-white transition-colors" style={{ border: `1px solid ${T.border}` }}>
+                                      <div className="flex items-center gap-1">
+                                        {dayOpen ? <ChevronDown size={12} style={{ color: T.muted }} /> : <ChevronRight size={12} style={{ color: T.muted }} />}
+                                        <p className="text-[11px] font-medium" style={{ color: T.ink }}>Ngày {day.date.slice(8, 10)}</p>
+                                        <span className="text-[10px] ml-auto" style={{ color: T.muted }}>{day.items.length} khoản</span>
+                                      </div>
+                                      <p className="text-xs font-semibold mt-0.5" style={{ color: T.ink }}>{mfmt(day.total, hideAmounts)}</p>
+                                    </NodeBox>
+                                  </button>
+
+                                  {dayOpen && (
+                                    <div className="mt-2 pl-5 border-l-2 text-left" style={{ borderColor: T.border }}>
+                                      {day.items.map((it) => (
+                                        <div key={it.id} className="relative pl-5 pt-2 first:pt-0">
+                                          <span className="absolute left-[-1px] top-5 w-5 h-px" style={{ background: T.border }} />
+                                          <NodeBox className="w-full max-w-xs" style={{ background: T.page }}>
+                                            <p className="text-xs font-medium truncate" style={{ color: T.ink }}>{it.subcategory || "—"}</p>
+                                            <p className="text-xs" style={{ color: T.muted }}>{mfmt(it.amount, hideAmounts)}</p>
+                                          </NodeBox>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })
                           )}
                         </div>
                       )}
