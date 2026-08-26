@@ -70,6 +70,62 @@ const monthLabel = (ym) => { const [y, m] = ym.split("-"); return `Tháng ${pars
 const monthEnd = (ym) => { const [y, m] = ym.split("-").map(Number); return new Date(y, m, 0).toISOString().slice(0, 10); };
 const dayLabel = (iso) => { const [y, m, d] = iso.split("-"); return `${parseInt(d, 10)} Thg ${parseInt(m, 10)}, ${y}`; };
 
+// ============================================================
+// CƠ CHẾ "CHƯA PHÂN BỔ" LŨY KẾ (kiểu YNAB — "Ready to Assign")
+// ------------------------------------------------------------
+// PHIÊN BẢN 1 (cũ hơn — theo NGÂN SÁCH ĐÃ LẬP của mọi tháng):
+//     Chưa phân bổ(N) = Tổng thu nhập lũy kế − Tổng NGÂN SÁCH ĐÃ LẬP lũy kế (mọi tháng)
+//   => Một khi đã lập hạn mức cho 1 danh mục, số tiền đó coi như "có chủ" VĨNH VIỄN — dù
+//      tháng đó tiêu không hết, phần dư vẫn bị khoá cứng vào đúng danh mục/tháng cũ, không
+//      bao giờ quay lại pool "Chưa phân bổ" để dùng cho việc khác nữa.
+//
+// PHIÊN BẢN 2 (MỚI — đúng tinh thần YNAB hơn, nhưng ĐƠN GIẢN HÓA phần carry-over):
+//   YNAB "chuẩn" giữ số dư còn lại gắn liền với TỪNG danh mục qua các tháng. Ở đây ta làm
+//   đơn giản hơn theo đúng ý bạn: KHÔNG giữ số dư gắn với danh mục cũ (vì mỗi tháng có thể
+//   cần chi cho việc khác), mà gom hết phần CHƯA TIÊU của các tháng đã qua trả THẲNG về
+//   pool "Chưa phân bổ" chung, sẵn sàng gán lại cho BẤT KỲ danh mục nào ở tháng hiện tại.
+//
+//   Quy tắc: một tháng chỉ coi là "đã đóng sổ" khi nó là tháng TRƯỚC tháng đang xem.
+//   - Với các tháng ĐÃ ĐÓNG SỔ (m < tháng đang xem): dùng đúng số ĐÃ CHI THỰC TẾ (không phải
+//     số đã lập ngân sách) để trừ vào pool — nên phần lập nhiều mà chưa xài hết sẽ tự động
+//     "tan ra", quay lại Chưa phân bổ (nếu tiêu VƯỢT ngân sách thì ngược lại, pool bị trừ
+//     nhiều hơn — đúng bản chất, vì tiền đó đã thực sự mất đi).
+//   - Với THÁNG ĐANG XEM (tháng vẫn "mở", còn có thể tiếp tục chi trong tháng): vẫn dùng số
+//     NGÂN SÁCH ĐÃ LẬP (không phải đã chi) — vì tháng chưa kết thúc, tiền đã gán coi như vẫn
+//     đang "giữ chỗ" cho danh mục đó, CHƯA đến lúc hoàn trả về pool.
+//
+//     Chưa phân bổ(N) =  Thu nhập lũy kế tới hết tháng N
+//                       − Tổng ĐÃ CHI THỰC TẾ của các tháng TRƯỚC tháng N
+//                       − Ngân sách ĐÃ LẬP của riêng tháng N
+//
+//   Hệ quả (đúng như bạn kỳ vọng): ngay đầu một tháng mới, TRƯỚC KHI lập ngân sách gì cho
+//   tháng đó, "Chưa phân bổ" sẽ bằng CHÍNH XÁC số dư thực tế đang có trong ví (tiền mặt +
+//   tài khoản) tính tới lúc đó — vì lúc này mọi khoản dư của các tháng trước đều đã "được
+//   thả tự do" trở lại, không còn khoản nào bị khoá cứng vào danh mục cũ nữa.
+// ============================================================
+function computeCumulativeUnallocated(transactions, budgets, month) {
+  const monthStart = `${month}-01`;
+  const monthEndCutoff = monthEnd(month); // "YYYY-MM-DD" cuối tháng đang xem
+
+  // Tổng thu nhập từ trước tới hết tháng đang xem
+  const cumulativeIncome = transactions.reduce(
+    (s, t) => (t.type === "income" && t.date <= monthEndCutoff ? s + t.amount : s),
+    0
+  );
+  // Tổng ĐÃ CHI THỰC TẾ của các tháng TRƯỚC tháng đang xem (các tháng đã "đóng sổ") — dùng
+  // số thực chi, KHÔNG dùng số đã lập ngân sách, để phần lập dư không tiêu hết tự trả về pool.
+  const spentBeforeThisMonth = transactions.reduce(
+    (s, t) => (t.type === "expense" && t.date < monthStart ? s + t.amount : s),
+    0
+  );
+  // Ngân sách đã lập CHO ĐÚNG tháng đang xem (tháng này vẫn đang "mở" nên vẫn coi là giữ chỗ)
+  const currentMonthBudgeted = Object.values((budgets[month] || {}).categories || {}).reduce(
+    (s, v) => s + v,
+    0
+  );
+  return cumulativeIncome - spentBeforeThisMonth - currentMonthBudgeted;
+}
+
 // Tính vị trí nhãn % cho biểu đồ pie/donut, có so le để tránh đè chữ lên nhau
 // khi nhiều lát cắt nhỏ nằm sát nhau (ví dụ các lát 4%, 2%, 1% liền kề).
 const RADIAN = Math.PI / 180;
@@ -328,7 +384,7 @@ function ConfirmModal({ open, title = "Xác nhận xoá", message, confirmLabel 
 }
 
 // ---------- Tab 1: Overview ----------
-function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "web", walletBalances, isActive = true }) {
+function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "web", walletBalances, isActive = true, cumulativeUnallocated }) {
   const mobile = viewMode === "app";
   // Kích thước chữ / góc nghiêng trục biểu đồ co giãn theo giao diện đang xem: ở "app"
   // (màn hình hẹp) chữ cần nhỏ hơn và nhãn trục X cần nghiêng nhiều hơn để không bị chật/đè chữ.
@@ -371,20 +427,20 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
   const byCategory = useMemo(() => {
     const budgetedCats = mb.categories || {};
     const totalBudgeted = Object.values(budgetedCats).reduce((s, v) => s + v, 0);
-    // Nếu ngân sách đã lập vượt quá thu nhập (ví dụ lập trước ngân sách cho tháng chưa có thu nhập,
-    // hoặc thu nhập tháng này thấp hơn dự kiến), lấy TỔNG NGÂN SÁCH làm mẫu số để chia tỷ lệ %,
-    // để các lát cắt luôn cộng lại đúng 100%. Ngược lại (thu nhập >= ngân sách) vẫn lấy thu nhập làm mẫu số như cũ.
-    const denom = totalBudgeted > totalIncome ? totalBudgeted : totalIncome;
+    // SAU (mới): dùng "Chưa phân bổ" LŨY KẾ (kiểu YNAB, xem computeCumulativeUnallocated) làm
+    // mẫu số + lát cắt "Chưa phân bổ", thay vì chỉ so với thu nhập của riêng tháng này.
+    // Nếu số lũy kế đang ÂM (đã lập ngân sách vượt quá số tiền sẵn có), không cộng thêm lát cắt
+    // "Chưa phân bổ" nữa — phần vượt đó được thể hiện riêng ở badge "Ngân sách vượt thu nhập".
+    const denom = cumulativeUnallocated > 0 ? totalBudgeted + cumulativeUnallocated : totalBudgeted;
     const list = Object.entries(budgetedCats).map(([name, value], i) => ({
       name, value, color: colorFor(name, i), pct: denom ? Math.round((value / denom) * 100) : 0,
     }));
-    const unallocated = totalIncome - totalBudgeted;
-    if (unallocated > 0) {
-      list.push({ name: "Chưa phân bổ", value: unallocated, color: "#C9C4AE", pct: denom ? Math.round((unallocated / denom) * 100) : 0 });
+    if (cumulativeUnallocated > 0) {
+      list.push({ name: "Chưa phân bổ", value: cumulativeUnallocated, color: "#C9C4AE", pct: denom ? Math.round((cumulativeUnallocated / denom) * 100) : 0 });
     }
     list.sort((a, b) => b.value - a.value);
     return list;
-  }, [mb, totalIncome]);
+  }, [mb, cumulativeUnallocated]);
 
   // Xếp hạng danh mục chi tiêu — dạng PHÂN CẤP: cấp 1 là danh mục (tổng toàn bộ chi tiêu
   // của danh mục đó), bấm vào để mở rộng xem cấp 2 (từng chi tiết bên trong danh mục đó).
@@ -430,10 +486,10 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
     () => niceMax(budgetVsActual.reduce((m, d) => Math.max(m, d["Hạn mức"], d["Đã chi"]), 0)),
     [budgetVsActual]
   );
-  const unallocatedBudget = useMemo(() => {
-    const totalCatBudget = Object.values(mb.categories).reduce((s, v) => s + v, 0);
-    return totalIncome - totalCatBudget;
-  }, [mb, totalIncome]);
+  // TRƯỚC (cũ): unallocatedBudget = totalIncome(tháng này) − totalCatBudget(tháng này).
+  // SAU (mới): dùng thẳng số "Chưa phân bổ" LŨY KẾ được App tính sẵn và truyền xuống —
+  // xem computeCumulativeUnallocated ở đầu file để biết công thức đầy đủ.
+  const unallocatedBudget = cumulativeUnallocated;
 
   const byDay = useMemo(() => {
     const days = {};
@@ -766,7 +822,7 @@ function NodeBox({ children, className = "", style }) {
   return <div className={`rounded-xl px-3 py-2 text-left min-w-[140px] ${className}`} style={style}>{children}</div>;
 }
 
-function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmounts }) {
+function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmounts, cumulativeUnallocated }) {
   const txMonth = useMemo(() => transactions.filter((t) => t.date.startsWith(month)), [transactions, month]);
   const totalIncome = txMonth.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const totalExpense = txMonth.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
@@ -778,10 +834,10 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
     return Object.entries(map).map(([name, value]) => ({ name, value }));
   }, [txMonth]);
 
-  // "Chưa phân bổ" dùng cùng công thức với biểu đồ "Phân bổ dòng tiền ra theo danh mục" và
-  // "Ngân sách so với thực chi": thu nhập trừ đi tổng ngân sách đã gán cho các danh mục — để 3 nơi luôn khớp nhau.
-  const totalCatBudget = useMemo(() => Object.values(mb.categories).reduce((s, v) => s + v, 0), [mb]);
-  const unallocated = totalIncome - totalCatBudget;
+  // TRƯỚC (cũ): "Chưa phân bổ" = thu nhập tháng này − tổng ngân sách đã lập cho tháng này.
+  // SAU (mới): dùng "Chưa phân bổ" LŨY KẾ (kiểu YNAB) do App tính sẵn — khớp với OverviewTab
+  // và BudgetTab, xem computeCumulativeUnallocated ở đầu file.
+  const unallocated = cumulativeUnallocated;
 
   const expenseByCat = useMemo(() => {
     const map = {};
@@ -1011,7 +1067,7 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
 }
 
 // ---------- Tab: Budget (lập ngân sách) ----------
-function BudgetTab({ budgets, month, categories, transactions, hideAmounts, viewMode = "web", onAddExpenseCategory, onUpsertBudget, onDeleteBudget, onDeleteCategory }) {
+function BudgetTab({ budgets, month, categories, transactions, hideAmounts, viewMode = "web", onAddExpenseCategory, onUpsertBudget, onDeleteBudget, onDeleteCategory, cumulativeUnallocated }) {
   const mobile = viewMode === "app";
   // Dùng chung đúng 1 bộ lọc tháng của toàn app (ở sidebar/thanh trên) — không còn bộ chọn
   // tháng riêng cho tab này nữa, tránh gây rối vì có tới 2 nơi lọc tháng cùng lúc.
@@ -1041,9 +1097,16 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
   // Ngân sách tổng của tháng luôn bằng đúng tổng thu nhập tháng đó (khớp với tab "Trực quan dòng tiền"),
   // không còn là con số đặt tay tách biệt — toàn bộ thu nhập là "chiếc bánh" cần phân bổ.
   const totalCatBudget = useMemo(() => Object.values(mb.categories).reduce((s, v) => s + v, 0), [mb]);
-  const unallocatedNow = totalIncome - totalCatBudget;
-  const pctAllocated = totalIncome > 0
-    ? Math.min(100, Math.round((totalCatBudget / totalIncome) * 100))
+  // TRƯỚC (cũ): unallocatedNow = totalIncome(tháng này) − totalCatBudget(tháng này) — reset mỗi tháng.
+  // SAU (mới): unallocatedNow = "Chưa phân bổ" LŨY KẾ (kiểu YNAB) tính tới hết tháng này, được
+  // App tính sẵn và truyền xuống — cộng dồn phần dư/âm từ các tháng trước.
+  const unallocatedNow = cumulativeUnallocated;
+  // "Sẵn có để phân bổ" cho tháng này = phần chưa phân bổ lũy kế HIỆN TẠI cộng lại đúng phần
+  // đã lập ngân sách trong tháng này (vì unallocatedNow đã trừ phần đó rồi) — tức là tổng số
+  // tiền có thể phân bổ TRƯỚC khi lập ngân sách của tháng này.
+  const availableToAllocate = unallocatedNow + totalCatBudget;
+  const pctAllocated = availableToAllocate > 0
+    ? Math.min(100, Math.round((totalCatBudget / availableToAllocate) * 100))
     : (totalCatBudget > 0 ? 100 : 0);
 
   // ---- category (lv1) budgets ----
@@ -1053,6 +1116,17 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
   const [newCatName, setNewCatName] = useState("");
   const budgetedCats = Object.keys(mb.categories);
   const availableCats = categories.expense.map((c) => c.name).filter((n) => !budgetedCats.includes(n) || n === editingCat);
+
+  // Số tiền TỐI ĐA được phép gõ vào ô "Hạn mức" cho danh mục đang chọn: chính là số "Chưa
+  // phân bổ" hiện tại, CỘNG THÊM số tiền đã lỡ gán cho ĐÚNG danh mục đang sửa (nếu có) — vì
+  // số đó đã bị trừ khỏi "Chưa phân bổ" rồi, cần cộng lại tạm thời để biết "room" thật sự khi
+  // đổi sang một con số mới cho danh mục này (không tính ngân sách của các danh mục khác).
+  const maxAllowedAmount = useMemo(() => {
+    const addBack = editingCat && mb.categories[editingCat] != null ? mb.categories[editingCat] : 0;
+    return unallocatedNow + addBack;
+  }, [unallocatedNow, editingCat, mb]);
+  const catAmountNum = Number(catForm.amount) || 0;
+  const catAmountExceedsMax = catForm.amount !== "" && catAmountNum > maxAllowedAmount;
 
   useEffect(() => { setCatForm({ category: "", amount: "" }); setEditingCat(null); setAddingNewCat(false); setNewCatName(""); }, [budgetMonth]);
 
@@ -1069,6 +1143,8 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
   const submitCatBudget = async (e) => {
     e.preventDefault();
     if (!catForm.category || !catForm.amount) return;
+    // Chặn cứng: không cho lưu nếu hạn mức vượt quá số tiền thật sự sẵn có (xem maxAllowedAmount).
+    if (catAmountExceedsMax) return;
     // Nếu đang sửa và người dùng đã đổi sang danh mục khác, xoá ngân sách cũ (theo tên cũ)
     // trước khi lưu ngân sách mới dưới tên danh mục vừa chọn — tránh để lại 2 dòng ngân sách.
     if (editingCat && editingCat !== catForm.category) {
@@ -1113,9 +1189,9 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
         </div>
 
         <div>
-          {totalIncome <= 0 && (
+          {availableToAllocate <= 0 && (
             <p className="text-xs mb-3" style={{ color: T.muted }}>
-              Chưa có thu nhập nào được ghi nhận cho tháng này — bạn vẫn có thể lập hạn mức ngân sách và ghi chép chi tiêu bình thường, phần dưới sẽ hiển thị là "Ngân sách vượt thu nhập" cho đến khi có thu nhập được ghi nhận.
+              Số tiền sẵn có để phân bổ (tính lũy kế từ trước tới nay) hiện đang bằng 0 hoặc âm — bạn vẫn có thể lập hạn mức ngân sách và ghi chép chi tiêu bình thường, phần dưới sẽ hiển thị là "Vượt thu nhập" cho đến khi có thêm thu nhập mới hoặc giảm bớt ngân sách ở danh mục khác để bù lại.
             </p>
           )}
           <div className="flex items-baseline justify-between flex-wrap gap-2 mb-2">
@@ -1132,52 +1208,59 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
             <div className="h-full" style={{ width: `${pctAllocated}%`, background: unallocatedNow < 0 ? T.rust : T.green }} />
             {unallocatedNow >= 0 && <div className="h-full" style={{ width: `${100 - pctAllocated}%`, background: T.border }} />}
           </div>
-          <p className="text-xs mt-1.5" style={{ color: T.muted }}>Tổng thu nhập tháng này: {mfmt(totalIncome, hideAmounts)}</p>
         </div>
       </div>
 
       <div className="rounded-2xl bg-white p-5">
         <h3 className="text-sm font-medium mb-3" style={{ color: T.ink }}>Ngân sách theo danh mục — {monthLabel(budgetMonth)}</h3>
 
-        <form onSubmit={submitCatBudget} ref={catFormRef} className={mobile ? "grid grid-cols-1 gap-3 mb-5" : "flex flex-wrap gap-2 mb-5 items-end"}>
-          <div className={mobile ? "w-full" : "flex-1 min-w-[160px]"}>
-            <label className="text-xs mb-1 block" style={{ color: T.muted }}>Danh mục</label>
-            {!addingNewCat ? (
-              <SelectWithDelete
-                value={catForm.category}
-                onChange={(v) => setCatForm((f) => ({ ...f, category: v }))}
-                options={availableCats.map((n) => ({ value: n, label: n }))}
-                placeholder="— Chọn danh mục —"
-                onDeleteOption={onDeleteCategory ? handleDeleteCategory : undefined}
-                deleteTitle="Xoá danh mục này"
-                onAddNew={() => setAddingNewCat(true)}
-              />
-            ) : (
-              <div className="flex gap-2">
-                <input autoFocus value={newCatName} onChange={(e) => setNewCatName(e.target.value)}
-                  placeholder="Ví dụ: Sức khỏe" className="flex-1 rounded-lg border px-3 py-2 text-sm focus:outline-none" style={inputStyle}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmNewCat(); } }} />
-                <button type="button" onClick={confirmNewCat} className="rounded-lg px-2 text-white" style={{ background: T.green }}><Check size={16} /></button>
-                <button type="button" onClick={() => { setAddingNewCat(false); setNewCatName(""); }}
-                  className="rounded-lg border px-2" style={{ borderColor: T.border, color: T.muted }}><X size={16} /></button>
+        <form onSubmit={submitCatBudget} ref={catFormRef} className="mb-5">
+          <div className={mobile ? "grid grid-cols-1 gap-3" : "flex flex-wrap gap-3 items-end"}>
+            <div className={mobile ? "w-full" : "flex-1 min-w-[220px]"}>
+              <label className="text-xs mb-1 block" style={{ color: T.muted }}>Danh mục</label>
+              {!addingNewCat ? (
+                <SelectWithDelete
+                  value={catForm.category}
+                  onChange={(v) => setCatForm((f) => ({ ...f, category: v }))}
+                  options={availableCats.map((n) => ({ value: n, label: n }))}
+                  placeholder="— Chọn danh mục —"
+                  onDeleteOption={onDeleteCategory ? handleDeleteCategory : undefined}
+                  deleteTitle="Xoá danh mục này"
+                  onAddNew={() => setAddingNewCat(true)}
+                />
+              ) : (
+                <div className="flex gap-2">
+                  <input autoFocus value={newCatName} onChange={(e) => setNewCatName(e.target.value)}
+                    placeholder="Ví dụ: Sức khỏe" className="flex-1 rounded-lg border px-3 py-2 text-sm focus:outline-none" style={inputStyle}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmNewCat(); } }} />
+                  <button type="button" onClick={confirmNewCat} className="rounded-lg px-2 text-white" style={{ background: T.green }}><Check size={16} /></button>
+                  <button type="button" onClick={() => { setAddingNewCat(false); setNewCatName(""); }}
+                    className="rounded-lg border px-2" style={{ borderColor: T.border, color: T.muted }}><X size={16} /></button>
+                </div>
+              )}
+            </div>
+            <div className={mobile ? "w-full" : "flex-1 min-w-[180px]"}>
+              <label className="text-xs mb-1 block" style={{ color: T.muted }}>Hạn mức</label>
+              <div className="relative">
+                <input type="text" inputMode="numeric" value={formatAmount(catForm.amount)}
+                  onChange={(e) => setCatForm((f) => ({ ...f, amount: digitsOnly(e.target.value) }))}
+                  placeholder="0" className="w-full rounded-lg border pl-3 pr-9 py-2 text-sm focus:outline-none" style={catAmountExceedsMax ? { ...inputStyle, borderColor: T.rust } : inputStyle} />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: T.muted }}>đ</span>
               </div>
+            </div>
+            <button type="submit" disabled={catAmountExceedsMax} className={`rounded-lg px-4 py-2 text-white text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed ${mobile ? "w-full" : ""}`} style={{ background: T.ink }}>
+              {editingCat ? <Check size={14} /> : <Plus size={14} />} {editingCat ? "Lưu" : "Thêm"}
+            </button>
+            {editingCat && (
+              <button type="button" onClick={cancelEditCat} className={`rounded-lg border px-4 py-2 text-sm ${mobile ? "w-full" : ""}`} style={{ borderColor: T.border, color: T.muted }}>Hủy</button>
             )}
           </div>
-          <div className={mobile ? "w-full" : "w-40"}>
-            <label className="text-xs mb-1 block" style={{ color: T.muted }}>Hạn mức</label>
-            <div className="relative">
-              <input type="text" inputMode="numeric" value={formatAmount(catForm.amount)}
-                onChange={(e) => setCatForm((f) => ({ ...f, amount: digitsOnly(e.target.value) }))}
-                placeholder="0" className="w-full rounded-lg border pl-3 pr-9 py-2 text-sm focus:outline-none" style={inputStyle} />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: T.muted }}>đ</span>
-            </div>
-          </div>
-          <button type="submit" className={`rounded-lg px-3 py-2 text-white text-sm font-medium flex items-center justify-center gap-1 ${mobile ? "w-full" : ""}`} style={{ background: T.ink }}>
-            {editingCat ? <Check size={14} /> : <Plus size={14} />} {editingCat ? "Lưu" : "Thêm"}
-          </button>
-          {editingCat && (
-            <button type="button" onClick={cancelEditCat} className={`rounded-lg border px-3 py-2 text-sm ${mobile ? "w-full" : ""}`} style={{ borderColor: T.border, color: T.muted }}>Hủy</button>
-          )}
+
+          <p className="text-[11px] mt-1.5" style={{ color: catAmountExceedsMax ? T.rust : T.muted }}>
+            {catAmountExceedsMax
+              ? `Vượt quá số tiền sẵn có — tối đa ${mfmt(Math.max(maxAllowedAmount, 0), hideAmounts)}.`
+              : `Sẵn có tối đa: ${mfmt(Math.max(maxAllowedAmount, 0), hideAmounts)}`}
+          </p>
         </form>
 
         <div className="space-y-3">
@@ -2275,6 +2358,14 @@ export default function App() {
     return { cash, bank: total - cash, total };
   }, [transactions, walletTransfers]);
 
+  // "Chưa phân bổ" LŨY KẾ (kiểu YNAB) tính tới hết tháng đang xem — dùng chung cho cả 3 tab
+  // (Tổng quan, Trực quan dòng tiền, Lập ngân sách) để 3 nơi luôn khớp nhau tuyệt đối.
+  // Xem giải thích công thức đầy đủ ở hàm computeCumulativeUnallocated phía đầu file.
+  const cumulativeUnallocated = useMemo(
+    () => computeCumulativeUnallocated(transactions, budgets, month),
+    [transactions, budgets, month]
+  );
+
   const statusBanner =
     loading || loadError ? (
       <div
@@ -2296,10 +2387,10 @@ export default function App() {
           ở tab "Tổng quan" bị khởi tạo lại từ đầu mỗi lần quay lại tab đó, có lúc lỡ nhịp đo và
           hiện bảng xếp hạng dài tràn lan cho tới khi tải lại cả trang mới hết. */}
       <div style={{ display: tab === "overview" ? "block" : "none" }}>
-        <OverviewTab transactions={transactions} month={month} budgets={budgets} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} isActive={tab === "overview"} />
+        <OverviewTab transactions={transactions} month={month} budgets={budgets} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} isActive={tab === "overview"} cumulativeUnallocated={cumulativeUnallocated} />
       </div>
       <div style={{ display: tab === "flow" ? "block" : "none" }}>
-        <CashFlowTab transactions={transactions} month={month} budgets={budgets} viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts} />
+        <CashFlowTab transactions={transactions} month={month} budgets={budgets} viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts} cumulativeUnallocated={cumulativeUnallocated} />
       </div>
       <div style={{ display: tab === "budget" ? "block" : "none" }}>
         <BudgetTab
@@ -2307,6 +2398,7 @@ export default function App() {
           viewMode={viewMode === "app" ? "app" : "web"}
           onAddExpenseCategory={addExpenseCategory} onUpsertBudget={upsertBudget} onDeleteBudget={deleteBudget}
           onDeleteCategory={deleteCategory}
+          cumulativeUnallocated={cumulativeUnallocated}
         />
       </div>
       <div style={{ display: tab === "entry" ? "block" : "none" }}>
