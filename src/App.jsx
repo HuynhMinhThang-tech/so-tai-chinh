@@ -244,6 +244,17 @@ function mapTransactionRow(row) {
 function mapWalletTransferRow(row) {
   return { id: row.id, date: row.date, direction: row.direction, amount: Number(row.amount), note: row.note || "", createdAt: row.created_at };
 }
+function mapBudgetTransferRow(row) {
+  return {
+    id: row.id,
+    month: row.month,
+    date: row.date,
+    from: row.from_category,
+    to: row.to_category,
+    amount: Number(row.amount),
+    createdAt: row.created_at,
+  };
+}
 function mapBudgetsFromRows(rows) {
   const budgets = {};
   (rows || []).forEach((r) => {
@@ -1126,7 +1137,138 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
 }
 
 // ---------- Tab: Budget (lập ngân sách) ----------
-function BudgetTab({ budgets, month, categories, transactions, hideAmounts, viewMode = "web", onAddExpenseCategory, onUpsertBudget, onDeleteBudget, onDeleteCategory, cumulativeUnallocated }) {
+// Panel chuyển ngân sách qua lại giữa 2 danh mục (VD: Mua sắm còn dư 84k -> chuyển thẳng
+// sang Di chuyển), thay vì phải xoá hạn mức cũ -> chờ về "Chưa phân bổ" -> rồi lập lại hạn
+// mức mới cho danh mục kia. Số tiền tối đa được phép chuyển đi = phần "còn lại" (hạn mức
+// đã lập trừ đi số đã chi) của danh mục nguồn — phần đã chi rồi thì không thể chuyển đi nữa.
+function TransferBudgetModal({ open, fromName, maxAmount, targetOptions, hideAmounts, onConfirm, onCancel }) {
+  const [amount, setAmount] = useState("");
+  const [to, setTo] = useState("");
+  useEffect(() => {
+    if (open) { setAmount(""); setTo(""); }
+  }, [open, fromName]);
+  if (!open) return null;
+
+  const formatAmount = (raw) => (raw ? Number(raw).toLocaleString("vi-VN") : "");
+  const amountNum = Number(amount) || 0;
+  const exceeds = amount !== "" && amountNum > maxAmount;
+  const canSubmit = amountNum > 0 && !exceeds && !!to;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(32,38,31,0.45)" }}
+      onClick={onCancel}
+    >
+      <div
+        className="rounded-2xl bg-white p-5 w-full max-w-sm"
+        style={{ boxShadow: "0 16px 40px rgba(32,38,31,0.25)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-sm font-semibold mb-1 ff-serif flex items-center gap-1.5" style={{ color: T.ink, fontSize: 16 }}>
+          <ArrowLeftRight size={15} style={{ color: T.green }} /> Chuyển ngân sách
+        </h3>
+        <p className="text-xs mb-4 leading-relaxed" style={{ color: T.muted }}>
+          Từ <span className="font-medium" style={{ color: T.ink }}>{fromName}</span> — khả dụng để chuyển:{" "}
+          <span className="font-semibold" style={{ color: maxAmount > 0 ? T.green : T.rust }}>{mfmt(Math.max(maxAmount, 0), hideAmounts)}</span>
+        </p>
+
+        {maxAmount <= 0 ? (
+          <p className="text-xs mb-4" style={{ color: T.muted }}>
+            Danh mục này không còn khoản dư nào để chuyển đi (đã chi hết hoặc vượt hạn mức).
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: T.muted }}>Số tiền chuyển</label>
+              <div className="relative">
+                <input
+                  type="text" inputMode="numeric" value={formatAmount(amount)}
+                  onChange={(e) => setAmount(e.target.value.replace(/\D/g, ""))}
+                  placeholder="0" className="w-full rounded-lg border pl-3 pr-9 py-2 text-sm focus:outline-none"
+                  style={{ borderColor: exceeds ? T.rust : T.border, color: T.ink, background: T.card }}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: T.muted }}>đ</span>
+              </div>
+              {exceeds && <p className="text-[11px] mt-1" style={{ color: T.rust }}>Vượt quá số tiền khả dụng.</p>}
+            </div>
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: T.muted }}>Chuyển sang danh mục</label>
+              <SelectWithDelete value={to} onChange={setTo} options={targetOptions} placeholder="— Chọn danh mục đích —" />
+              {targetOptions.length === 0 && (
+                <p className="text-[11px] mt-1.5" style={{ color: T.muted }}>Chưa có danh mục nào khác đang được lập ngân sách để chuyển đến.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button type="button" onClick={onCancel} className="rounded-lg border px-3.5 py-2 text-sm font-medium" style={{ borderColor: T.border, color: T.muted, background: T.card }}>
+            Hủy
+          </button>
+          {maxAmount > 0 && (
+            <button
+              type="button"
+              disabled={!canSubmit}
+              onClick={() => onConfirm({ amount: amountNum, to })}
+              className="rounded-lg px-3.5 py-2 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              style={{ background: T.green }}
+            >
+              <ArrowLeftRight size={14} /> Chuyển
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Lịch sử các lượt "chuyển ngân sách" giữa 2 danh mục trong tháng đang xem — hiển thị gọn bên
+// dưới danh sách ngân sách theo danh mục, giống cách "Lịch sử chuyển đổi tiền mặt ⇄ tài khoản"
+// hiển thị bên dưới nhật ký ở tab "Ghi chép thu chi". Dùng chung cho cả giao diện Web lẫn App —
+// chỉ khác chiều cao tối đa hiển thị trước khi cuộn (App thấp hơn cho vừa màn hình điện thoại).
+function BudgetTransferHistory({ transfers, onDelete, hideAmounts, mobile }) {
+  const list = transfers || [];
+  const maxHeight = mobile ? 220 : 300;
+  return (
+    <div className="rounded-2xl bg-white p-4">
+      <div className="flex items-center gap-1.5 mb-2.5">
+        <ArrowLeftRight size={13} style={{ color: T.muted }} />
+        <h3 className="text-xs font-medium" style={{ color: T.ink }}>Lịch sử chuyển ngân sách</h3>
+      </div>
+      {list.length === 0 ? (
+        <p className="text-xs py-2" style={{ color: T.muted }}>Chưa có lượt chuyển ngân sách nào trong tháng này.</p>
+      ) : (
+        <div className={`space-y-2 overflow-y-auto pr-1 ${mobile ? "" : ""}`} style={{ maxHeight }}>
+          {list.map((t, idx) => (
+            <div
+              key={t.id}
+              className={`flex items-center gap-2 text-xs ${mobile ? "flex-wrap" : ""}`}
+              style={idx < list.length - 1 ? { paddingBottom: 8, borderBottom: `1px solid ${T.border}` } : undefined}
+            >
+              <span className="shrink-0 ff-mono" style={{ color: T.muted }}>
+                {t.date ? `Ngày ${t.date.slice(8, 10)}` : ""}
+              </span>
+              <span className={`flex items-center gap-1.5 min-w-0 ${mobile ? "w-full order-3 mt-0.5" : "flex-1"}`}>
+                <span className="truncate" style={{ color: T.rust }}>{t.from}</span>
+                <ArrowLeftRight size={10} style={{ color: T.muted, flexShrink: 0 }} />
+                <span className="truncate" style={{ color: T.green }}>{t.to}</span>
+              </span>
+              <span className="font-semibold shrink-0 ml-auto" style={{ color: T.ink }}>{mfmt(t.amount, hideAmounts)}</span>
+              {onDelete && (
+                <button onClick={() => onDelete(t.id)} title="Hoàn tác lượt chuyển này" className="shrink-0 p-1 rounded-md" style={{ color: T.muted }}>
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BudgetTab({ budgets, month, categories, transactions, hideAmounts, viewMode = "web", onAddExpenseCategory, onUpsertBudget, onDeleteBudget, onDeleteCategory, cumulativeUnallocated, budgetTransfers, onTransferBudget, onDeleteBudgetTransfer }) {
   const mobile = viewMode === "app";
   // Dùng chung đúng 1 bộ lọc tháng của toàn app (ở sidebar/thanh trên) — không còn bộ chọn
   // tháng riêng cho tab này nữa, tránh gây rối vì có tới 2 nơi lọc tháng cùng lúc.
@@ -1187,7 +1329,7 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
   const catAmountNum = Number(catForm.amount) || 0;
   const catAmountExceedsMax = catForm.amount !== "" && catAmountNum > maxAllowedAmount;
 
-  useEffect(() => { setCatForm({ category: "", amount: "" }); setEditingCat(null); setAddingNewCat(false); setNewCatName(""); }, [budgetMonth]);
+  useEffect(() => { setCatForm({ category: "", amount: "" }); setEditingCat(null); setAddingNewCat(false); setNewCatName(""); setTransferFrom(null); }, [budgetMonth]);
 
   const confirmNewCat = async () => {
     const name = newCatName.trim();
@@ -1219,6 +1361,34 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
     await onDeleteBudget(budgetMonth, name);
     if (editingCat === name) cancelEditCat();
   };
+
+  // ---- Chuyển ngân sách qua lại giữa 2 danh mục (VD: Mua sắm còn dư -> Di chuyển) ----
+  // Thay vì phải: xoá hạn mức cũ -> chờ về "Chưa phân bổ" -> lập lại hạn mức mới cho danh
+  // mục kia, giờ chỉ cần bấm nút chuyển đổi ngay trên từng dòng ngân sách.
+  const [transferFrom, setTransferFrom] = useState(null);
+  const openTransfer = (name) => setTransferFrom(name);
+  const closeTransfer = () => setTransferFrom(null);
+  // Số tiền tối đa được phép chuyển đi = phần "còn lại" của danh mục nguồn (hạn mức đã lập
+  // trừ đi số đã chi thực tế) — phần đã chi rồi thì không thể chuyển đi được nữa.
+  const transferMaxAmount = transferFrom != null
+    ? (mb.categories[transferFrom] || 0) - (spentByCategory[transferFrom] || 0)
+    : 0;
+  const transferTargetOptions = transferFrom != null
+    ? budgetedCats.filter((n) => n !== transferFrom).map((n) => ({ value: n, label: n }))
+    : [];
+  const confirmTransfer = async ({ amount, to }) => {
+    const from = transferFrom;
+    if (!from || !to || amount <= 0) return;
+    if (amount > transferMaxAmount) return;
+    await onTransferBudget(budgetMonth, from, to, amount);
+    closeTransfer();
+  };
+
+  // Lịch sử chuyển ngân sách CHỈ của tháng đang xem (mỗi lượt chuyển gắn với đúng 1 tháng).
+  const monthBudgetTransfers = useMemo(
+    () => (budgetTransfers || []).filter((t) => t.month === budgetMonth),
+    [budgetTransfers, budgetMonth]
+  );
 
   // Xoá hẳn 1 danh mục chi tiêu ngay từ trong dropdown chọn danh mục (dấu X) — cùng kiểu thao
   // tác với tab "Ghi chép thu chi". Nếu danh mục đó đang có hạn mức ngân sách cho tháng này,
@@ -1352,6 +1522,9 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
                         Vượt ngân sách
                       </span>
                     )}
+                    {budgetedCats.length > 1 && (
+                      <button onClick={() => openTransfer(name)} title="Chuyển ngân sách sang danh mục khác" className="p-1.5 rounded-md" style={{ color: T.muted }}><ArrowLeftRight size={13} /></button>
+                    )}
                     <button onClick={() => startEditCat(name)} className="p-1.5 rounded-md" style={{ color: T.muted }}><Pencil size={13} /></button>
                     <button onClick={() => removeCatBudget(name)} className="p-1.5 rounded-md" style={{ color: T.muted }}><Trash2 size={13} /></button>
                   </div>
@@ -1371,6 +1544,23 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
           })}
         </div>
       </div>
+
+      <BudgetTransferHistory
+        transfers={monthBudgetTransfers}
+        onDelete={onDeleteBudgetTransfer}
+        hideAmounts={hideAmounts}
+        mobile={mobile}
+      />
+
+      <TransferBudgetModal
+        open={transferFrom != null}
+        fromName={transferFrom}
+        maxAmount={transferMaxAmount}
+        targetOptions={transferTargetOptions}
+        hideAmounts={hideAmounts}
+        onConfirm={confirmTransfer}
+        onCancel={closeTransfer}
+      />
 
       <ConfirmModal
         open={!!confirmDeleteCat}
@@ -2113,8 +2303,14 @@ function WalletTransferHistory({ walletTransfers, onDeleteWalletTransfer, hideAm
         <div ref={listRef} className="space-y-1.5 flex-1 min-h-0 overflow-y-auto pr-1">
           {recent.map((w, idx) => {
             const toCash = w.direction === "bank_to_cash";
+            const isLast = idx === recent.length - 1;
             return (
-              <div key={w.id} ref={idx === 0 ? rowRef : undefined} className="flex items-center gap-2 text-xs">
+              <div
+                key={w.id}
+                ref={idx === 0 ? rowRef : undefined}
+                className="flex items-center gap-2 text-xs"
+                style={!isLast ? { paddingBottom: 6, borderBottom: `1px solid ${T.border}` } : undefined}
+              >
                 <span className="shrink-0" style={{ color: T.muted }}>{w.date}</span>
                 <span className="flex items-center gap-1 flex-1 min-w-0" style={{ color: T.ink }}>
                   {toCash ? <Landmark size={11} style={{ color: T.green }} /> : <Banknote size={11} style={{ color: T.olive }} />}
@@ -2188,6 +2384,7 @@ export default function App() {
   const [categories, setCategories] = useState({ income: [], expense: [] });
   const [budgets, setBudgets] = useState({});
   const [walletTransfers, setWalletTransfers] = useState([]);
+  const [budgetTransfers, setBudgetTransfers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [tab, setTab] = useState("overview");
@@ -2214,14 +2411,15 @@ export default function App() {
     setLoading(true);
     setLoadError(null);
 
-    const [catRes, subRes, txRes, budgetRes, transferRes] = await Promise.all([
+    const [catRes, subRes, txRes, budgetRes, transferRes, budgetTransferRes] = await Promise.all([
       supabase.from("fin_categories").select("*"),
       supabase.from("fin_subcategories").select("*"),
       supabase.from("fin_transactions").select("*").order("date", { ascending: false }),
       supabase.from("fin_budgets").select("*"),
       supabase.from("fin_wallet_transfers").select("*").order("date", { ascending: false }).order("created_at", { ascending: false }),
+      supabase.from("fin_budget_transfers").select("*").order("date", { ascending: false }).order("created_at", { ascending: false }),
     ]);
-    const err = catRes.error || subRes.error || txRes.error || budgetRes.error || transferRes.error;
+    const err = catRes.error || subRes.error || txRes.error || budgetRes.error || transferRes.error || budgetTransferRes.error;
     if (err) {
       setLoadError(err.message);
       setLoading(false);
@@ -2231,6 +2429,7 @@ export default function App() {
     setTransactions((txRes.data || []).map(mapTransactionRow));
     setBudgets(mapBudgetsFromRows(budgetRes.data));
     setWalletTransfers((transferRes.data || []).map(mapWalletTransferRow));
+    setBudgetTransfers((budgetTransferRes.data || []).map(mapBudgetTransferRow));
     setLoading(false);
   }, []);
 
@@ -2388,6 +2587,41 @@ export default function App() {
     if (error) setLoadError(error.message);
   };
 
+  // Chuyển ngân sách qua lại giữa 2 danh mục trong CÙNG một tháng (VD: dời phần hạn mức còn
+  // dư của "Mua sắm" sang "Di chuyển") — cập nhật cả 2 dòng ngân sách, đồng thời ghi lại 1
+  // dòng lịch sử vào fin_budget_transfers để hiển thị ở "Lịch sử chuyển ngân sách".
+  const transferBudget = async (budgetMonth, fromCategory, toCategory, amount) => {
+    if (!amount || amount <= 0) return;
+    const cur = budgets[budgetMonth] || { total: null, categories: {} };
+    const newFromBudget = (cur.categories[fromCategory] || 0) - amount;
+    const newToBudget = (cur.categories[toCategory] || 0) + amount;
+    await upsertBudget(budgetMonth, fromCategory, newFromBudget);
+    await upsertBudget(budgetMonth, toCategory, newToBudget);
+    if (!supabase) { setLoadError("Chưa cấu hình Supabase — không thể lưu lịch sử chuyển ngân sách."); return; }
+    const payload = { month: budgetMonth, date: todayISO(), from_category: fromCategory, to_category: toCategory, amount };
+    const { data, error } = await supabase.from("fin_budget_transfers").insert(payload).select().single();
+    if (error) { setLoadError(error.message); return; }
+    setBudgetTransfers((prev) => [mapBudgetTransferRow(data), ...prev]);
+  };
+
+  // Xoá 1 dòng lịch sử chuyển ngân sách = HOÀN TÁC lượt chuyển đó: cộng lại đúng số tiền cho
+  // danh mục nguồn, trừ lại cho danh mục đích. Nếu danh mục đích đã bị giảm xuống dưới số này
+  // (do có chỉnh sửa khác sau đó), chặn ở 0 để không vi phạm ràng buộc "amount >= 0".
+  const deleteBudgetTransferRecord = async (id) => {
+    const record = budgetTransfers.find((t) => t.id === id);
+    setBudgetTransfers((prev) => prev.filter((t) => t.id !== id));
+    if (record) {
+      const cur = budgets[record.month] || { total: null, categories: {} };
+      const restoredFrom = (cur.categories[record.from] || 0) + record.amount;
+      const restoredTo = Math.max((cur.categories[record.to] || 0) - record.amount, 0);
+      await upsertBudget(record.month, record.from, restoredFrom);
+      await upsertBudget(record.month, record.to, restoredTo);
+    }
+    if (!supabase) return;
+    const { error } = await supabase.from("fin_budget_transfers").delete().eq("id", id);
+    if (error) setLoadError(error.message);
+  };
+
   const tabs = [
     { id: "overview", label: "Tổng quan", shortLabel: "Tổng quan", icon: LayoutGrid },
     { id: "flow", label: "Trực quan dòng tiền", shortLabel: "Dòng tiền", icon: GitBranch },
@@ -2458,6 +2692,9 @@ export default function App() {
           onAddExpenseCategory={addExpenseCategory} onUpsertBudget={upsertBudget} onDeleteBudget={deleteBudget}
           onDeleteCategory={deleteCategory}
           cumulativeUnallocated={cumulativeUnallocated}
+          budgetTransfers={budgetTransfers}
+          onTransferBudget={transferBudget}
+          onDeleteBudgetTransfer={deleteBudgetTransferRecord}
         />
       </div>
       <div style={{ display: tab === "entry" ? "block" : "none" }}>
