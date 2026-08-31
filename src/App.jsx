@@ -67,7 +67,16 @@ const niceMax = (max) => {
   return Math.ceil(padded / magnitude) * magnitude;
 };
 const monthLabel = (ym) => { const [y, m] = ym.split("-"); return `Tháng ${parseInt(m, 10)}/${y}`; };
-const monthEnd = (ym) => { const [y, m] = ym.split("-").map(Number); return new Date(y, m, 0).toISOString().slice(0, 10); };
+// TRƯỚC (lỗi): dùng new Date(y, m, 0).toISOString().slice(0,10) — toISOString() quy đổi thời
+// điểm "00:00:00 giờ địa phương" sang UTC trước khi cắt chuỗi. Với múi giờ DƯƠNG so với UTC
+// (VD Việt Nam, UTC+7), điều này làm NGÀY BỊ LÙI VỀ HÔM TRƯỚC (ngày 31 bị tính nhầm thành 30),
+// khiến mọi phép tính "lũy kế tới hết tháng" (Số dư tháng này, Chưa phân bổ, ngày cuối cho phép
+// lọc nhật ký, v.v.) VÔ TÌNH BỎ SÓT các khoản ghi đúng vào ngày cuối cùng của tháng — đây chính
+// là nguyên nhân KPI "Số dư tháng này" không khớp với "Tiền mặt hiện có" + "Tiền trong tài khoản"
+// (2 số này KHÔNG bị giới hạn theo cutoff nên vẫn cộng đủ, còn "Số dư tháng này" thì thiếu).
+// SAU (đúng): dùng localISODate() — lấy ngày theo GIỜ ĐỊA PHƯƠNG, khớp với cách todayISO() và
+// mọi nơi khác trong app đang tính ngày (xem giải thích chi tiết ở hàm localISODate bên dưới).
+const monthEnd = (ym) => { const [y, m] = ym.split("-").map(Number); return localISODate(new Date(y, m, 0)); };
 const dayLabel = (iso) => { const [y, m, d] = iso.split("-"); return `${parseInt(d, 10)} Thg ${parseInt(m, 10)}, ${y}`; };
 
 // ============================================================
