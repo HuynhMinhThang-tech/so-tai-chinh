@@ -7,7 +7,7 @@ import {
 import {
   Wallet, TrendingUp, TrendingDown, PiggyBank, ChevronDown, ChevronRight,
   Plus, Pencil, Trash2, LayoutGrid, GitBranch, NotebookPen, X, Check,
-  Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, ArrowLeftRight, AlertTriangle, Search,
+  Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, ArrowLeftRight, AlertTriangle, Search, Download,
 } from "lucide-react";
 
 // ---------- Theme: DÙNG CHUNG bảng màu & font với app "Việc Của Tôi" ----------
@@ -77,6 +77,22 @@ const monthLabel = (ym) => { const [y, m] = ym.split("-"); return `Tháng ${pars
 // SAU (đúng): dùng localISODate() — lấy ngày theo GIỜ ĐỊA PHƯƠNG, khớp với cách todayISO() và
 // mọi nơi khác trong app đang tính ngày (xem giải thích chi tiết ở hàm localISODate bên dưới).
 const monthEnd = (ym) => { const [y, m] = ym.split("-").map(Number); return localISODate(new Date(y, m, 0)); };
+// Trả về tháng liền TRƯỚC "YYYY-MM" của một tháng "YYYY-MM" cho trước (VD: "2026-09" -> "2026-08").
+function prevMonthOf(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m - 2, 1); // (m-1) là tháng hiện tại (0-indexed), trừ thêm 1 để lùi về tháng trước
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+// Số dư LŨY KẾ (tổng thu - tổng chi, cộng dồn MỌI giao dịch từ trước tới nay) tính đến hết một
+// ngày cắt (cutoffDate, dạng "YYYY-MM-DD") cho trước. Dùng để lấy "số dư cuối tháng trước" — tức
+// là số tiền còn lại ("carry-over") sẽ được mang sang tháng sau, mà KHÔNG ghi thành một giao dịch
+// thật nào cả (chỉ là con số suy ra từ các giao dịch đã có).
+function computeCumulativeBalanceUpTo(transactions, cutoffDate) {
+  return transactions.reduce((sum, t) => {
+    if (t.date > cutoffDate) return sum;
+    return sum + (t.type === "income" ? t.amount : -t.amount);
+  }, 0);
+}
 const dayLabel = (iso) => { const [y, m, d] = iso.split("-"); return `${parseInt(d, 10)} Thg ${parseInt(m, 10)}, ${y}`; };
 
 // ============================================================
@@ -179,6 +195,30 @@ function colorFor(name, index) {
 }
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
+// ---------- Xuất file CSV (mở được bằng Excel / Google Sheets để tự phân tích) ----------
+// Không cần cài thêm thư viện nào (không dùng xlsx) — chỉ dựng 1 chuỗi CSV thuần rồi tải về
+// bằng Blob, cách này chạy được trên mọi trình duyệt, kể cả trên "app" (mobile).
+function csvEscape(value) {
+  const s = value === null || value === undefined ? "" : String(value);
+  // Nếu ô có dấu phẩy, dấu ngoặc kép, hoặc xuống dòng thì phải bọc trong "..." và nhân đôi dấu " bên trong.
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+function downloadCsv(filename, headerRow, dataRows) {
+  const lines = [headerRow, ...dataRows].map((row) => row.map(csvEscape).join(","));
+  // Thêm BOM (\uFEFF) ở đầu file để Excel nhận đúng bảng mã UTF-8 — nếu không, tiếng Việt có
+  // dấu (VD: "Ăn uống") sẽ bị hiển thị sai ký tự khi mở file bằng Excel trên Windows.
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function detectDevice() {
   if (typeof window === "undefined") return "web";
   const ua = window.navigator?.userAgent || "";
@@ -274,14 +314,33 @@ function mapBudgetsFromRows(rows) {
 }
 
 // ---------- Small UI atoms ----------
-function KpiCard({ icon: Icon, label, value, accent }) {
+// "breakdown" (tuỳ chọn): danh sách các dòng nhỏ giải thích các thành phần cộng lại thành
+// "value" ở trên — dùng cho trường hợp "Tổng thu nhập tháng" giờ gồm cả số dư mang sang từ
+// tháng trước cộng với thu nhập thật của tháng này, để người dùng nhìn ra ngay 2 phần đó.
+// Thẻ luôn cao bằng NHAU trong cùng 1 hàng (nhờ "h-full" + grid cha có "items-stretch"), và nội
+// dung được CĂN GIỮA theo chiều dọc ("justify-center") — nhờ vậy các thẻ không có "breakdown"
+// (ngắn hơn) vẫn nhìn cân đối, không bị dồn hết lên trên rồi để trống mảng lớn phía dưới.
+function KpiCard({ icon: Icon, label, value, accent, breakdown }) {
   return (
-    <div className="rounded-2xl bg-white p-4" style={{ borderLeft: `3px solid ${accent}` }}>
+    <div
+      className="rounded-2xl bg-white p-4 h-full flex flex-col justify-center"
+      style={{ borderLeft: `3px solid ${accent}` }}
+    >
       <div className="flex items-center gap-2 mb-2">
         <Icon size={15} style={{ color: accent }} />
       </div>
       <p className="text-2xl font-medium ff-mono" style={{ color: T.ink }}>{value}</p>
       <p className="text-xs mt-0.5" style={{ color: T.muted }}>{label}</p>
+      {breakdown && breakdown.length > 0 && (
+        <div className="mt-2 pt-2 space-y-0.5" style={{ borderTop: `1px dashed ${T.border}` }}>
+          {breakdown.map((b, i) => (
+            <div key={i} className="flex items-center justify-between text-[11px]">
+              <span style={{ color: T.muted }}>{b.label}</span>
+              <span className="ff-mono" style={{ color: T.ink }}>{b.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -404,7 +463,7 @@ function ConfirmModal({ open, title = "Xác nhận xoá", message, confirmLabel 
 }
 
 // ---------- Tab 1: Overview ----------
-function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "web", walletBalances, isActive = true, cumulativeUnallocated }) {
+function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "web", walletBalances, isActive = true, cumulativeUnallocated, carryOverBalance = 0 }) {
   const mobile = viewMode === "app";
   // Kích thước chữ / góc nghiêng trục biểu đồ co giãn theo giao diện đang xem: ở "app"
   // (màn hình hẹp) chữ cần nhỏ hơn và nhãn trục X cần nghiêng nhiều hơn để không bị chật/đè chữ.
@@ -426,6 +485,10 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
   const txMonth = useMemo(() => transactions.filter((t) => t.date.startsWith(month)), [transactions, month]);
   const totalIncome = txMonth.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const totalExpense = txMonth.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  // "Tổng thu nhập tháng" hiển thị ở KPI đầu trang = thu nhập THẬT của tháng này CỘNG THÊM số
+  // dư còn lại từ cuối tháng trước ("carry-over") — số dư này KHÔNG phải một giao dịch thật,
+  // chỉ là con số suy ra để biết tổng "nguồn tiền" đang có sẵn tính đến thời điểm hiện tại.
+  const totalIncomeWithCarryOver = totalIncome + carryOverBalance;
   // KPI "Số dư" hiển thị ở đầu trang: số dư LŨY KẾ (tiền mặt + tài khoản CỘNG DỒN mọi giao dịch
   // từ trước tới nay) tính đến CUỐI tháng đang lọc — khớp đúng ý nghĩa với 2 ô "Tiền mặt hiện
   // có" / "Tiền trong tài khoản" bên dưới (vốn cũng là số lũy kế, không reset theo tháng).
@@ -568,8 +631,25 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
 
   return (
     <div className="space-y-5">
-      <div className={`grid gap-3 ${mobile ? "grid-cols-1" : "grid-cols-3"}`}>
-        <KpiCard icon={TrendingUp} label="Tổng thu nhập tháng" value={mfmt(totalIncome, hideAmounts)} accent={T.green} />
+      {/* Trên bản web: "auto-rows-fr" ép TẤT CẢ các hàng KPI cao bằng nhau (hàng nào có nội
+          dung dài nhất — VD hàng có "breakdown" của "Tổng thu nhập tháng" — sẽ quyết định
+          chiều cao chung cho mọi hàng), nhìn cân xứng hơn. Trên "app" (mobile) GIỮ NGUYÊN như
+          cũ — mỗi thẻ 1 hàng riêng (grid-cols-1) nên không cần và không áp dụng auto-rows-fr. */}
+      <div className={`grid gap-3 items-stretch ${mobile ? "grid-cols-1" : "grid-cols-3 auto-rows-fr"}`}>
+        <KpiCard
+          icon={TrendingUp}
+          label="Tổng thu nhập tháng"
+          value={mfmt(totalIncomeWithCarryOver, hideAmounts)}
+          accent={T.green}
+          breakdown={
+            carryOverBalance !== 0
+              ? [
+                  { label: carryOverBalance >= 0 ? "Số dư tháng trước" : "Nợ tháng trước", value: mfmt(Math.abs(carryOverBalance), hideAmounts) },
+                  { label: "Thu nhập tháng này", value: mfmt(totalIncome, hideAmounts) },
+                ]
+              : null
+          }
+        />
         <KpiCard icon={PiggyBank} label={unallocatedBudget < 0 ? "Ngân sách vượt thu nhập" : "Chưa phân bổ"} value={mfmt(Math.abs(unallocatedBudget), hideAmounts)} accent={unallocatedBudget < 0 ? T.rust : T.olive} />
         <KpiCard icon={TrendingDown} label="Tổng chi tiêu" value={mfmt(totalExpense, hideAmounts)} accent={T.rust} />
         <KpiCard icon={Wallet} label="Số dư tháng này" value={mfmt(balance, hideAmounts)} accent={balance >= 0 ? T.green : T.rust} />
@@ -842,17 +922,31 @@ function NodeBox({ children, className = "", style }) {
   return <div className={`rounded-xl px-3 py-2 text-left min-w-[140px] ${className}`} style={style}>{children}</div>;
 }
 
-function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmounts, cumulativeUnallocated }) {
+function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmounts, cumulativeUnallocated, carryOverBalance = 0 }) {
   const txMonth = useMemo(() => transactions.filter((t) => t.date.startsWith(month)), [transactions, month]);
   const totalIncome = txMonth.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const totalExpense = txMonth.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  // Tổng "nguồn tiền vào" hiển thị ở gốc cây = thu nhập thật của tháng này CỘNG số dư mang
+  // sang từ cuối tháng trước (carry-over) — chỉ là con số hiển thị, KHÔNG cộng vào số dư ví thật.
+  const totalIncomeWithCarryOver = totalIncome + carryOverBalance;
   const mb = budgets[month] || { total: null, categories: {} };
 
   const incomeByCat = useMemo(() => {
     const map = {};
     txMonth.filter((t) => t.type === "income").forEach((t) => { map[t.category] = (map[t.category] || 0) + t.amount; });
-    return Object.entries(map).map(([name, value]) => ({ name, value }));
-  }, [txMonth]);
+    const list = Object.entries(map).map(([name, value]) => ({ name, value }));
+    // Nhánh ẢO đại diện cho số dư còn lại từ tháng trước — đây CHỈ LÀ CƠ CHẾ HIỂN THỊ để tổng
+    // "dòng tiền vào" của tháng phản ánh đúng số tiền thực sự đang sẵn có, KHÔNG phải một
+    // giao dịch thật và không được ghi vào fin_transactions / không cộng vào walletBalances.
+    if (carryOverBalance !== 0) {
+      list.unshift({
+        name: carryOverBalance >= 0 ? "Số dư tháng trước" : "Nợ tháng trước",
+        value: carryOverBalance,
+        isCarryOver: true,
+      });
+    }
+    return list;
+  }, [txMonth, carryOverBalance]);
 
   // TRƯỚC (cũ): "Chưa phân bổ" = thu nhập tháng này − tổng ngân sách đã lập cho tháng này.
   // SAU (mới): dùng "Chưa phân bổ" LŨY KẾ (kiểu YNAB) do App tính sẵn — khớp với OverviewTab
@@ -915,16 +1009,20 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
         <div className="rounded-2xl bg-white p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-medium" style={{ color: T.ink }}>Dòng tiền vào</h3>
-            <span className="text-sm font-semibold" style={{ color: T.green }}>{mfmt(totalIncome, hideAmounts)}</span>
+            <span className="text-sm font-semibold" style={{ color: T.green }}>{mfmt(totalIncomeWithCarryOver, hideAmounts)}</span>
           </div>
-          {totalIncome === 0 ? (
+          {totalIncomeWithCarryOver === 0 ? (
             <p className="text-sm text-center py-6" style={{ color: T.muted }}>Chưa ghi nhận thu nhập nào trong tháng này.</p>
           ) : (
             <div className="space-y-2">
               {incomeByCat.map((c) => (
-                <div key={c.name} className="flex items-center justify-between rounded-xl px-3 py-2.5" style={{ background: T.greenSoft }}>
-                  <span className="text-sm" style={{ color: T.green }}>{c.name}</span>
-                  <span className="text-sm font-semibold" style={{ color: T.ink }}>{mfmt(c.value, hideAmounts)}</span>
+                <div
+                  key={c.name}
+                  className="flex items-center justify-between rounded-xl px-3 py-2.5"
+                  style={c.isCarryOver ? { border: `1.5px dashed ${T.olive}`, background: T.oliveSoft } : { background: T.greenSoft }}
+                >
+                  <span className="text-sm" style={{ color: c.isCarryOver ? T.olive : T.green }}>{c.name}</span>
+                  <span className="text-sm font-semibold" style={{ color: T.ink }}>{mfmt(c.isCarryOver ? Math.abs(c.value) : c.value, hideAmounts)}</span>
                 </div>
               ))}
             </div>
@@ -936,7 +1034,7 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
             <h3 className="text-sm font-medium" style={{ color: T.ink }}>Dòng tiền ra</h3>
             <span className="text-sm font-semibold" style={{ color: T.rust }}>{mfmt(totalExpense, hideAmounts)}</span>
           </div>
-          {totalIncome === 0 && totalExpense === 0 ? (
+          {totalIncomeWithCarryOver === 0 && totalExpense === 0 ? (
             <p className="text-sm text-center py-6" style={{ color: T.muted }}>Chưa ghi nhận dòng tiền nào trong tháng này.</p>
           ) : (
             <div className="space-y-2.5">
@@ -1020,21 +1118,27 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
         <div className="mb-4">
           <h3 className="text-sm font-medium" style={{ color: T.ink }}>Dòng tiền vào — {monthLabel(month)}</h3>
         </div>
-        {totalIncome === 0 ? (
+        {totalIncomeWithCarryOver === 0 ? (
           <p className="text-sm text-center py-8" style={{ color: T.muted }}>Chưa ghi nhận thu nhập nào trong tháng này.</p>
         ) : (
           <div className="fin-tree min-w-max mx-auto" style={{ transform: "scaleY(-1)" }}>
             <ul><li>
               <NodeBox className="min-w-[170px]" style={{ background: T.green, color: "#fff", transform: "scaleY(-1)" }}>
                 <p className="text-xs opacity-90">Tổng thu nhập</p>
-                <p className="font-semibold">{mfmt(totalIncome, hideAmounts)}</p>
+                <p className="font-semibold">{mfmt(totalIncomeWithCarryOver, hideAmounts)}</p>
               </NodeBox>
               <ul>
                 {incomeByCat.map((c) => (
                   <li key={c.name}>
-                    <NodeBox style={{ background: T.greenSoft, transform: "scaleY(-1)" }}>
-                      <p className="text-xs" style={{ color: T.green }}>{c.name}</p>
-                      <p className="text-sm font-semibold" style={{ color: T.ink }}>{mfmt(c.value, hideAmounts)}</p>
+                    <NodeBox
+                      style={
+                        c.isCarryOver
+                          ? { background: T.oliveSoft, border: `1.5px dashed ${T.olive}`, transform: "scaleY(-1)" }
+                          : { background: T.greenSoft, transform: "scaleY(-1)" }
+                      }
+                    >
+                      <p className="text-xs" style={{ color: c.isCarryOver ? T.olive : T.green }}>{c.name}</p>
+                      <p className="text-sm font-semibold" style={{ color: T.ink }}>{mfmt(c.isCarryOver ? Math.abs(c.value) : c.value, hideAmounts)}</p>
                     </NodeBox>
                   </li>
                 ))}
@@ -1048,14 +1152,14 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
         <div className="mb-4">
           <h3 className="text-sm font-medium" style={{ color: T.ink }}>Dòng tiền ra — {monthLabel(month)}</h3>
         </div>
-        {totalIncome === 0 && totalExpense === 0 ? (
+        {totalIncomeWithCarryOver === 0 && totalExpense === 0 ? (
           <p className="text-sm text-center py-8" style={{ color: T.muted }}>Chưa ghi nhận dòng tiền nào trong tháng này.</p>
         ) : (
           <div className="fin-tree min-w-max mx-auto">
             <ul><li>
               <NodeBox className="min-w-[170px]" style={{ background: T.rust, color: "#fff" }}>
                 <p className="text-xs opacity-90">Tổng dòng tiền ra</p>
-                <p className="font-semibold">{mfmt(totalIncome, hideAmounts)}</p>
+                <p className="font-semibold">{mfmt(totalIncomeWithCarryOver, hideAmounts)}</p>
               </NodeBox>
               <ul>
                 {expenseByCat.map((c) => {
@@ -1763,6 +1867,21 @@ function EntryTab({
       }),
     [txMonth, logDateFrom, logDateTo, logTypeFilter, logSearchNormalized, logSearchDigits]
   );
+  // Xuất ĐÚNG danh sách đang hiển thị trong Nhật ký (đã áp dụng bộ lọc loại/khoảng ngày/tìm
+  // kiếm hiện tại) ra file CSV — mở được bằng Excel / Google Sheets để tự phân tích, theo dõi.
+  const exportJournalCsv = () => {
+    if (filteredLogTx.length === 0) return;
+    const header = ["Ngày", "Loại", "Danh mục", "Chi tiết", "Số tiền (đ)", "Hình thức"];
+    const rows = filteredLogTx.map((t) => [
+      t.date,
+      t.type === "income" ? "Thu nhập" : "Chi tiêu",
+      t.category,
+      t.subcategory || "",
+      t.amount,
+      t.paymentMethod === "cash" ? "Tiền mặt" : "Chuyển khoản",
+    ]);
+    downloadCsv(`nhat-ky-thu-chi_${month}.csv`, header, rows);
+  };
   const txByDay = useMemo(() => {
     const groups = [];
     const index = {};
@@ -2002,7 +2121,24 @@ function EntryTab({
       <div className={mobile ? "space-y-4" : "col-span-3 space-y-4"}>
       <div className="rounded-2xl bg-white overflow-hidden">
         <div ref={journalHeaderRef} className="p-4" style={{ borderBottom: `1px solid ${T.border}` }}>
-          <h3 className="text-sm font-medium mb-3" style={{ color: T.ink }}>Nhật ký {monthLabel(month)}</h3>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h3 className="text-sm font-medium" style={{ color: T.ink }}>Nhật ký {monthLabel(month)}</h3>
+            {/* Nút xuất CSV CHỈ hiện ở bản Web — vì file tải về sẽ nằm gọn trong thư mục
+                "Downloads" của trình duyệt máy tính. Trên "app" (mobile), trình duyệt di động
+                không có nơi lưu trữ file rõ ràng để người dùng dễ tìm lại, nên ẩn nút này đi. */}
+            {!mobile && (
+              <button
+                type="button"
+                onClick={exportJournalCsv}
+                disabled={filteredLogTx.length === 0}
+                title="Xuất file CSV (mở bằng Excel/Google Sheets) để tự phân tích, theo dõi"
+                className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ borderColor: T.border, color: T.ink, background: T.card }}
+              >
+                <Download size={13} /> Xuất CSV
+              </button>
+            )}
+          </div>
           <div className="relative mb-2.5">
             <Search size={14} style={{ color: T.muted, position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
             <input
@@ -2668,6 +2804,15 @@ export default function App() {
     [transactions, budgets, month]
   );
 
+  // Số dư còn lại từ CUỐI THÁNG TRƯỚC (carry-over) — dùng để cộng hiển thị vào "Tổng thu nhập
+  // tháng" (KPI + tab Trực quan dòng tiền), cho thấy đúng tổng "nguồn tiền" đang sẵn có tính
+  // đến hiện tại. Đây CHỈ LÀ CON SỐ HIỂN THỊ, suy ra từ các giao dịch đã có — hoàn toàn không
+  // ghi thêm giao dịch nào và không làm thay đổi walletBalances/số dư ví thật.
+  const carryOverBalance = useMemo(
+    () => computeCumulativeBalanceUpTo(transactions, monthEnd(prevMonthOf(month))),
+    [transactions, month]
+  );
+
   const statusBanner =
     loading || loadError ? (
       <div
@@ -2689,10 +2834,10 @@ export default function App() {
           ở tab "Tổng quan" bị khởi tạo lại từ đầu mỗi lần quay lại tab đó, có lúc lỡ nhịp đo và
           hiện bảng xếp hạng dài tràn lan cho tới khi tải lại cả trang mới hết. */}
       <div style={{ display: tab === "overview" ? "block" : "none" }}>
-        <OverviewTab transactions={transactions} month={month} budgets={budgets} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} isActive={tab === "overview"} cumulativeUnallocated={cumulativeUnallocated} />
+        <OverviewTab transactions={transactions} month={month} budgets={budgets} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} isActive={tab === "overview"} cumulativeUnallocated={cumulativeUnallocated} carryOverBalance={carryOverBalance} />
       </div>
       <div style={{ display: tab === "flow" ? "block" : "none" }}>
-        <CashFlowTab transactions={transactions} month={month} budgets={budgets} viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts} cumulativeUnallocated={cumulativeUnallocated} />
+        <CashFlowTab transactions={transactions} month={month} budgets={budgets} viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts} cumulativeUnallocated={cumulativeUnallocated} carryOverBalance={carryOverBalance} />
       </div>
       <div style={{ display: tab === "budget" ? "block" : "none" }}>
         <BudgetTab
