@@ -297,6 +297,13 @@ const SUPABASE_ANON_KEY =
 const supabase =
   SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
+// Chỉ true khi đang chạy `npm run dev` (Vite dev server) / môi trường development — dùng để ẩn
+// hẳn nút chuyển đổi xem thử "Web ⇄ App" khỏi bản THẬT đã build/deploy cho người dùng cuối,
+// vì nút đó chỉ có ích lúc code/xem thử giao diện, không nên xuất hiện khi dùng thực tế.
+const IS_DEV =
+  (typeof import.meta !== "undefined" && import.meta.env && !!import.meta.env.DEV) ||
+  (typeof process !== "undefined" && process.env && process.env.NODE_ENV === "development");
+
 /* ---------- mapping: hàng dữ liệu Supabase (snake_case) <-> object dùng trong UI (camelCase) ---------- */
 function mapCategoriesFromRows(catRows, subRows) {
   const subsByCategory = new Map();
@@ -2521,7 +2528,7 @@ function Greeting({ session, className = "", style }) {
   const { label, Icon, color } = period;
   return (
     <span className={`ff-sans inline-flex items-center gap-1.5 ${className}`} style={style}>
-      <Icon size={18} style={{ color, flexShrink: 0 }} />
+      <Icon size={16} style={{ color, flexShrink: 0 }} />
       <span className="italic">
         <span className="font-semibold" style={{ color: T.ink }}>{label}</span>,{" "}
         <span className="font-bold" style={{ color: T.ink }}>{displayNameOf(session)}</span>
@@ -2749,8 +2756,8 @@ function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMod
         <div style={{ fontSize: 11, color: T.muted, marginBottom: 6, fontWeight: 600 }}>BỘ LỌC &amp; GIAO DIỆN</div>
         <MonthPicker value={month} onChange={setMonth} className="w-full" />
         <div className="flex gap-1.5 mt-2">
-          <ViewToggle value={viewMode} onChange={onViewChange} />
-          <AmountVisibilityToggle hidden={hideAmounts} onChange={onHideAmountsChange} />
+          {IS_DEV && <ViewToggle value={viewMode} onChange={onViewChange} />}
+          <AmountVisibilityToggle hidden={hideAmounts} onChange={onHideAmountsChange} full={!IS_DEV} />
         </div>
       </div>
     </aside>
@@ -3186,10 +3193,9 @@ export default function App() {
         <div className="flex items-center justify-between">
           <div>
             <div className="ff-serif" style={{ fontWeight: 700, fontSize: 17, color: T.ink }}>Sổ Tài Chính</div>
-            <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>{currentTabLabel}</div>
           </div>
           <div className="flex items-center gap-1.5">
-            <IconViewToggle value={viewMode} onChange={handleViewChange} />
+            {IS_DEV && <IconViewToggle value={viewMode} onChange={handleViewChange} />}
             <button
               type="button" onClick={handleLogout} aria-label="Đăng xuất"
               className="w-8 h-8 rounded-lg flex items-center justify-center"
