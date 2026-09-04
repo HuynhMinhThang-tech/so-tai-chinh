@@ -8,6 +8,7 @@ import {
   Wallet, TrendingUp, TrendingDown, PiggyBank, ChevronDown, ChevronRight,
   Plus, Pencil, Trash2, LayoutGrid, GitBranch, NotebookPen, X, Check,
   Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, ArrowLeftRight, AlertTriangle, Search, Download,
+  LogOut, Mail, Lock, UserCircle2, Loader2,
 } from "lucide-react";
 
 // ---------- Theme: DÙNG CHUNG bảng màu & font với app "Việc Của Tôi" ----------
@@ -194,6 +195,37 @@ function colorFor(name, index) {
   return CHART_COLORS[Math.abs(h + (index || 0)) % CHART_COLORS.length];
 }
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+
+// ============================================================
+// ĐĂNG NHẬP / ĐĂNG KÝ / PHIÊN ĐĂNG NHẬP (Supabase Auth)
+// ------------------------------------------------------------
+// - Mật khẩu KHÔNG bao giờ được app tự lưu hay tự băm — toàn bộ việc băm mật khẩu (bcrypt) do
+//   chính hệ thống Supabase Auth (GoTrue) đảm nhiệm ở phía server, app chỉ gửi mật khẩu dạng
+//   plaintext qua kết nối HTTPS trong đúng 1 lần gọi API — kể cả người có quyền truy cập trực
+//   tiếp vào Postgres (bảng auth.users) cũng chỉ nhìn thấy chuỗi hash, không thấy mật khẩu gốc.
+// - Phiên đăng nhập: Supabase tự làm mới access token ngầm, nên nếu không tự giới hạn thêm thì
+//   người dùng có thể ở trạng thái đăng nhập vô thời hạn. Ta tự lưu mốc thời gian đăng nhập vào
+//   localStorage và tự động đăng xuất sau đúng 24 giờ (xem enforceSessionExpiry bên dưới).
+// ============================================================
+const SESSION_LOGIN_AT_KEY = "fin_app_login_at";
+const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 giờ
+
+// Quy tắc mật khẩu: tối thiểu 8 ký tự, có ít nhất 1 chữ hoa, 1 chữ số, 1 ký tự đặc biệt.
+const PASSWORD_RULE_REGEX = /^(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9\s]).{8,}$/;
+const PASSWORD_RULE_HINT = "Tối thiểu 8 ký tự, gồm ít nhất 1 chữ HOA, 1 chữ số và 1 ký tự đặc biệt.";
+function isValidPassword(pw) { return PASSWORD_RULE_REGEX.test(pw || ""); }
+function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((email || "").trim()); }
+
+// "Chào sáng / chiều / tối" — lấy trực tiếp giờ hệ thống của thiết bị đang mở app.
+function getGreetingPeriod(date = new Date()) {
+  const h = date.getHours();
+  if (h >= 5 && h < 12) return "sáng";
+  if (h >= 12 && h < 18) return "chiều";
+  return "tối";
+}
+function displayNameOf(session) {
+  return session?.user?.user_metadata?.display_name || session?.user?.email || "bạn";
+}
 
 // ---------- Xuất file CSV (mở được bằng Excel / Google Sheets để tự phân tích) ----------
 // Không cần cài thêm thư viện nào (không dùng xlsx) — chỉ dựng 1 chuỗi CSV thuần rồi tải về
@@ -2477,8 +2509,206 @@ function WalletTransferHistory({ walletTransfers, onDeleteWalletTransfer, hideAm
   );
 }
 
+// ---------- Lời chào theo khung giờ (sáng / chiều / tối) ----------
+function Greeting({ session, className = "", style }) {
+  const [period, setPeriod] = useState(() => getGreetingPeriod());
+  // Tự cập nhật lại mỗi phút, phòng trường hợp người dùng mở app xuyên qua mốc chuyển buổi
+  // (VD: đang mở app từ 11h59 sáng sang 12h00 trưa) mà không cần tải lại trang.
+  useEffect(() => {
+    const id = setInterval(() => setPeriod(getGreetingPeriod()), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <span className={`ff-sans ${className}`} style={style}>
+      Chào {period}, <span className="font-semibold">{displayNameOf(session)}</span>
+    </span>
+  );
+}
+
+// ---------- Màn hình Đăng nhập / Đăng ký / Quên mật khẩu / Đặt lại mật khẩu ----------
+function AuthScreen({ initialMode = "login" }) {
+  const [mode, setMode] = useState(initialMode); // "login" | "register" | "forgot" | "reset"
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const inputStyle = { borderColor: T.border, color: T.ink, background: T.card };
+  const passwordInvalid = (mode === "register" || mode === "reset") && password !== "" && !isValidPassword(password);
+
+  const resetMessages = () => { setError(""); setNotice(""); };
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    resetMessages();
+    if (!isValidEmail(email) || !password) { setError("Vui lòng nhập đầy đủ email và mật khẩu."); return; }
+    setSubmitting(true);
+    const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    setSubmitting(false);
+    if (err) setError("Email hoặc mật khẩu không đúng.");
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    resetMessages();
+    if (!isValidEmail(email)) { setError("Email không hợp lệ."); return; }
+    if (!displayName.trim()) { setError("Vui lòng nhập tên hiển thị."); return; }
+    if (!isValidPassword(password)) { setError(PASSWORD_RULE_HINT); return; }
+    if (password !== confirmPassword) { setError("Mật khẩu nhập lại không khớp."); return; }
+    setSubmitting(true);
+    const { data, error: err } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: { data: { display_name: displayName.trim() } },
+    });
+    setSubmitting(false);
+    if (err) { setError(err.message || "Đăng ký thất bại."); return; }
+    if (data.session) {
+      // Dự án đã tắt xác nhận email -> đăng nhập được ngay.
+      return;
+    }
+    setNotice("Đăng ký thành công! Vui lòng kiểm tra email để xác nhận tài khoản trước khi đăng nhập.");
+    setMode("login");
+  };
+
+  const handleForgot = async (e) => {
+    e.preventDefault();
+    resetMessages();
+    if (!isValidEmail(email)) { setError("Email không hợp lệ."); return; }
+    setSubmitting(true);
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+    });
+    setSubmitting(false);
+    if (err) { setError(err.message || "Không gửi được email đặt lại mật khẩu."); return; }
+    setNotice("Đã gửi email đặt lại mật khẩu. Vui lòng kiểm tra hộp thư (kể cả mục spam).");
+  };
+
+  // "Quên mật khẩu" -> tạo mật khẩu MỚI và GHI ĐÈ trực tiếp lên mật khẩu cũ (không có khái
+  // niệm "cấp lại"/"chỉnh sửa" mật khẩu cũ) — người dùng bấm vào link trong email, Supabase tự
+  // mở app ở đúng trạng thái "reset" (sự kiện PASSWORD_RECOVERY), rồi nhập mật khẩu mới ở đây.
+  const handleResetSubmit = async (e) => {
+    e.preventDefault();
+    resetMessages();
+    if (!isValidPassword(password)) { setError(PASSWORD_RULE_HINT); return; }
+    if (password !== confirmPassword) { setError("Mật khẩu nhập lại không khớp."); return; }
+    setSubmitting(true);
+    const { error: err } = await supabase.auth.updateUser({ password });
+    setSubmitting(false);
+    if (err) { setError(err.message || "Không đặt lại được mật khẩu."); return; }
+    setNotice("Đặt lại mật khẩu thành công! Bạn đã được đăng nhập bằng mật khẩu mới.");
+  };
+
+  const submitHandler = mode === "login" ? handleLogin : mode === "register" ? handleRegister : mode === "forgot" ? handleForgot : handleResetSubmit;
+
+  return (
+    <div className="ff-sans" style={{ minHeight: "100vh", background: T.page, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <FontImport />
+      <div className="rounded-2xl bg-white p-6 w-full max-w-sm" style={{ boxShadow: "0 16px 40px rgba(32,38,31,0.14)" }}>
+        <div className="mb-5 text-center">
+          <div className="ff-serif" style={{ fontWeight: 700, fontSize: 22, color: T.ink }}>Sổ Tài Chính</div>
+          <p className="text-xs mt-1" style={{ color: T.muted }}>
+            {mode === "login" && "Đăng nhập để tiếp tục"}
+            {mode === "register" && "Tạo tài khoản mới"}
+            {mode === "forgot" && "Khôi phục mật khẩu"}
+            {mode === "reset" && "Đặt mật khẩu mới"}
+          </p>
+        </div>
+
+        {error && <div className="rounded-lg px-3 py-2 text-xs mb-3" style={{ background: T.rustSoft, color: T.rust }}>{error}</div>}
+        {notice && <div className="rounded-lg px-3 py-2 text-xs mb-3" style={{ background: T.greenSoft, color: T.green }}>{notice}</div>}
+
+        <form onSubmit={submitHandler} className="space-y-3">
+          {mode !== "reset" && (
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: T.muted }}>Email</label>
+              <div className="relative">
+                <Mail size={14} style={{ color: T.muted, position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email"
+                  placeholder="ban@vidu.com" className="w-full rounded-lg border pl-8 pr-3 py-2 text-sm focus:outline-none" style={inputStyle} />
+              </div>
+            </div>
+          )}
+
+          {mode === "register" && (
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: T.muted }}>Tên hiển thị</label>
+              <div className="relative">
+                <UserCircle2 size={14} style={{ color: T.muted, position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+                <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoComplete="name"
+                  placeholder="Tên của bạn" className="w-full rounded-lg border pl-8 pr-3 py-2 text-sm focus:outline-none" style={inputStyle} />
+              </div>
+            </div>
+          )}
+
+          {mode !== "forgot" && (
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: T.muted }}>{mode === "reset" ? "Mật khẩu mới" : "Mật khẩu"}</label>
+              <div className="relative">
+                <Lock size={14} style={{ color: T.muted, position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+                <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
+                  autoComplete={mode === "login" ? "current-password" : "new-password"}
+                  placeholder="••••••••" className="w-full rounded-lg border pl-8 pr-9 py-2 text-sm focus:outline-none"
+                  style={passwordInvalid ? { ...inputStyle, borderColor: T.rust } : inputStyle} />
+                <button type="button" onClick={() => setShowPw((v) => !v)} className="absolute" style={{ right: 8, top: "50%", transform: "translateY(-50%)", color: T.muted }}>
+                  {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+              {(mode === "register" || mode === "reset") && (
+                <p className="text-[11px] mt-1" style={{ color: passwordInvalid ? T.rust : T.muted }}>{PASSWORD_RULE_HINT}</p>
+              )}
+            </div>
+          )}
+
+          {(mode === "register" || mode === "reset") && (
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: T.muted }}>Nhập lại mật khẩu</label>
+              <input type={showPw ? "text" : "password"} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password" placeholder="••••••••" className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none" style={inputStyle} />
+            </div>
+          )}
+
+          {mode === "login" && (
+            <div className="text-right">
+              <button type="button" onClick={() => { resetMessages(); setMode("forgot"); }} className="text-xs font-medium" style={{ color: T.green }}>
+                Quên mật khẩu?
+              </button>
+            </div>
+          )}
+
+          <button type="submit" disabled={submitting} className="w-full rounded-lg text-white text-sm font-medium py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-50" style={{ background: T.ink }}>
+            {submitting && <Loader2 size={14} className="animate-spin" />}
+            {mode === "login" && "Đăng nhập"}
+            {mode === "register" && "Đăng ký"}
+            {mode === "forgot" && "Gửi email đặt lại mật khẩu"}
+            {mode === "reset" && "Lưu mật khẩu mới"}
+          </button>
+        </form>
+
+        {mode !== "reset" && (
+          <p className="text-xs text-center mt-4" style={{ color: T.muted }}>
+            {mode === "login" ? (
+              <>Chưa có tài khoản?{" "}
+                <button onClick={() => { resetMessages(); setMode("register"); }} className="font-semibold" style={{ color: T.green }}>Đăng ký</button>
+              </>
+            ) : (
+              <>Đã có tài khoản?{" "}
+                <button onClick={() => { resetMessages(); setMode("login"); }} className="font-semibold" style={{ color: T.green }}>Đăng nhập</button>
+              </>
+            )}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---------- Sidebar (web) — cùng khuôn với sidebar app "Việc Của Tôi" ----------
-function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMode, onViewChange, hideAmounts, onHideAmountsChange }) {
+function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMode, onViewChange, hideAmounts, onHideAmountsChange, session, onLogout }) {
   return (
     <aside style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 18 }}>
       <div>
@@ -2518,6 +2748,18 @@ function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMod
           <AmountVisibilityToggle hidden={hideAmounts} onChange={onHideAmountsChange} />
         </div>
       </div>
+
+      <div className="mt-auto pt-3" style={{ borderTop: `1px solid ${T.border}` }}>
+        <Greeting session={session} className="text-xs block mb-2" style={{ color: T.muted }} />
+        <button
+          type="button"
+          onClick={onLogout}
+          className="w-full flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium"
+          style={{ borderColor: T.border, color: T.rust, background: T.card }}
+        >
+          <LogOut size={13} /> Đăng xuất
+        </button>
+      </div>
     </aside>
   );
 }
@@ -2544,6 +2786,56 @@ export default function App() {
   }, []);
 
   const handleViewChange = (v) => { manualOverride.current = true; setViewMode(v); };
+
+  // ---------- Đăng nhập / phiên đăng nhập (24h) ----------
+  const [session, setSession] = useState(null);
+  const [authReady, setAuthReady] = useState(false); // đã xác định xong có phiên hay không
+  const [authScreenMode, setAuthScreenMode] = useState("login"); // ép về "reset" khi có link đặt lại mật khẩu
+
+  // Nếu mốc "đăng nhập lúc" đã lưu quá 24 giờ -> tự đăng xuất, buộc nhập lại thông tin.
+  const enforceSessionExpiry = useCallback((sess) => {
+    if (!sess) return sess;
+    const loginAt = Number(localStorage.getItem(SESSION_LOGIN_AT_KEY) || 0);
+    if (!loginAt) {
+      // Phiên có sẵn nhưng chưa từng ghi mốc thời gian (VD: vừa bật tính năng này) -> ghi nhận từ bây giờ.
+      localStorage.setItem(SESSION_LOGIN_AT_KEY, String(Date.now()));
+      return sess;
+    }
+    if (Date.now() - loginAt > SESSION_MAX_AGE_MS) {
+      localStorage.removeItem(SESSION_LOGIN_AT_KEY);
+      supabase.auth.signOut();
+      return null;
+    }
+    return sess;
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) { setAuthReady(true); return; }
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(enforceSessionExpiry(data.session));
+      setAuthReady(true);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
+      if (event === "SIGNED_IN") localStorage.setItem(SESSION_LOGIN_AT_KEY, String(Date.now()));
+      if (event === "SIGNED_OUT") localStorage.removeItem(SESSION_LOGIN_AT_KEY);
+      if (event === "PASSWORD_RECOVERY") setAuthScreenMode("reset");
+      setSession(newSession);
+      setAuthReady(true);
+    });
+    // Kiểm tra định kỳ để tự đăng xuất đúng lúc 24h trôi qua, kể cả khi người dùng cứ để app
+    // mở liên tục trên màn hình mà không thao tác gì (không đợi tới lần load trang tiếp theo).
+    const interval = setInterval(() => {
+      setSession((cur) => (cur ? enforceSessionExpiry(cur) : cur));
+    }, 5 * 60 * 1000);
+    return () => { mounted = false; listener?.subscription?.unsubscribe?.(); clearInterval(interval); };
+  }, [enforceSessionExpiry]);
+
+  const handleLogout = async () => {
+    localStorage.removeItem(SESSION_LOGIN_AT_KEY);
+    await supabase.auth.signOut();
+  };
 
   // Đọc TOÀN BỘ dữ liệu thật từ Supabase (4 bảng: fin_categories, fin_subcategories,
   // fin_transactions, fin_budgets) và ghép lại thành state dùng cho UI.
@@ -2578,7 +2870,16 @@ export default function App() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    if (session) {
+      fetchAll();
+    } else {
+      // Đã đăng xuất (hoặc chưa đăng nhập) -> xoá sạch dữ liệu đang giữ trên UI, tránh lộ dữ
+      // liệu tài chính của phiên trước cho lần đăng nhập kế tiếp trên cùng thiết bị.
+      setTransactions([]); setCategories({ income: [], expense: [] }); setBudgets({});
+      setWalletTransfers([]); setBudgetTransfers([]); setLoading(false);
+    }
+  }, [session, fetchAll]);
 
   /* ---------- handlers: mỗi hàm cập nhật UI ngay, rồi đồng bộ với Supabase ---------- */
   const addTransaction = async (record) => {
@@ -2717,7 +3018,7 @@ export default function App() {
       return { ...prev, [budgetMonth]: { ...cur, categories: { ...cur.categories, [category]: amount } } };
     });
     if (!supabase) return;
-    const { error } = await supabase.from("fin_budgets").upsert({ month: budgetMonth, category, amount }, { onConflict: "month,category" });
+    const { error } = await supabase.from("fin_budgets").upsert({ month: budgetMonth, category, amount }, { onConflict: "user_id,month,category" });
     if (error) setLoadError(error.message);
   };
   const deleteBudget = async (budgetMonth, category) => {
@@ -2813,6 +3114,21 @@ export default function App() {
     [transactions, month]
   );
 
+  // ---- Chặn toàn bộ nội dung tài chính lại phía sau màn hình đăng nhập ----
+  // Chỉ khi có "session" (đã đăng nhập hợp lệ, còn hạn trong 24h) thì mới render dữ liệu — nhờ
+  // vậy dữ liệu KHÔNG được yêu cầu / KHÔNG hiển thị nếu chưa đăng nhập, kể cả trong 1 nhịp render.
+  if (!authReady) {
+    return (
+      <div className="ff-sans" style={{ minHeight: "100vh", background: T.page, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <FontImport />
+        <Loader2 size={22} className="animate-spin" style={{ color: T.muted }} />
+      </div>
+    );
+  }
+  if (!session) {
+    return <AuthScreen initialMode={authScreenMode} />;
+  }
+
   const statusBanner =
     loading || loadError ? (
       <div
@@ -2879,8 +3195,18 @@ export default function App() {
             <div className="ff-serif" style={{ fontWeight: 700, fontSize: 17, color: T.ink }}>Sổ Tài Chính</div>
             <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>{currentTabLabel}</div>
           </div>
-          <IconViewToggle value={viewMode} onChange={handleViewChange} />
+          <div className="flex items-center gap-1.5">
+            <IconViewToggle value={viewMode} onChange={handleViewChange} />
+            <button
+              type="button" onClick={handleLogout} aria-label="Đăng xuất"
+              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: T.card, border: `1px solid ${T.border}`, color: T.rust }}
+            >
+              <LogOut size={15} />
+            </button>
+          </div>
         </div>
+        <Greeting session={session} className="text-xs block mt-1.5" style={{ color: T.muted }} />
         <div className="flex items-center justify-between mt-3 gap-2">
           <MonthPicker value={month} onChange={setMonth} className="text-xs px-2 py-1" />
           <div className="flex items-center gap-2">
@@ -2955,6 +3281,7 @@ export default function App() {
           tab={tab} setTab={setTab} tabs={tabs} txCountThisMonth={txCountThisMonth}
           month={month} setMonth={setMonth} viewMode={viewMode} onViewChange={handleViewChange}
           hideAmounts={hideAmounts} onHideAmountsChange={setHideAmounts}
+          session={session} onLogout={handleLogout}
         />
         <main style={{ flex: 1, minWidth: 0 }}>
           <h2 className="ff-serif" style={{ fontWeight: 600, fontSize: 24, color: T.ink, margin: "4px 0 18px" }}>{currentTabLabel}</h2>
