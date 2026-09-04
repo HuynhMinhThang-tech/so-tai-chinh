@@ -8,7 +8,7 @@ import {
   Wallet, TrendingUp, TrendingDown, PiggyBank, ChevronDown, ChevronRight,
   Plus, Pencil, Trash2, LayoutGrid, GitBranch, NotebookPen, X, Check,
   Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, ArrowLeftRight, AlertTriangle, Search, Download,
-  LogOut, Mail, Lock, UserCircle2, Loader2,
+  LogOut, Mail, Lock, UserCircle2, Loader2, Sun, CloudSun, Moon,
 } from "lucide-react";
 
 // ---------- Theme: DÙNG CHUNG bảng màu & font với app "Việc Của Tôi" ----------
@@ -216,12 +216,12 @@ const PASSWORD_RULE_HINT = "Tối thiểu 8 ký tự, gồm ít nhất 1 chữ H
 function isValidPassword(pw) { return PASSWORD_RULE_REGEX.test(pw || ""); }
 function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((email || "").trim()); }
 
-// "Chào sáng / chiều / tối" — lấy trực tiếp giờ hệ thống của thiết bị đang mở app.
+// "Good morning / afternoon / evening" — lấy trực tiếp giờ hệ thống của thiết bị đang mở app.
 function getGreetingPeriod(date = new Date()) {
   const h = date.getHours();
-  if (h >= 5 && h < 12) return "sáng";
-  if (h >= 12 && h < 18) return "chiều";
-  return "tối";
+  if (h >= 5 && h < 12) return { label: "Good morning", Icon: Sun, color: "#B8792C" };
+  if (h >= 12 && h < 18) return { label: "Good afternoon", Icon: CloudSun, color: "#2F6F5E" };
+  return { label: "Good evening", Icon: Moon, color: "#3E4C6B" };
 }
 function displayNameOf(session) {
   return session?.user?.user_metadata?.display_name || session?.user?.email || "bạn";
@@ -2509,7 +2509,7 @@ function WalletTransferHistory({ walletTransfers, onDeleteWalletTransfer, hideAm
   );
 }
 
-// ---------- Lời chào theo khung giờ (sáng / chiều / tối) ----------
+// ---------- Lời chào theo khung giờ (buổi sáng / chiều / tối) ----------
 function Greeting({ session, className = "", style }) {
   const [period, setPeriod] = useState(() => getGreetingPeriod());
   // Tự cập nhật lại mỗi phút, phòng trường hợp người dùng mở app xuyên qua mốc chuyển buổi
@@ -2518,9 +2518,14 @@ function Greeting({ session, className = "", style }) {
     const id = setInterval(() => setPeriod(getGreetingPeriod()), 60 * 1000);
     return () => clearInterval(id);
   }, []);
+  const { label, Icon, color } = period;
   return (
-    <span className={`ff-sans ${className}`} style={style}>
-      Chào {period}, <span className="font-semibold">{displayNameOf(session)}</span>
+    <span className={`ff-sans inline-flex items-center gap-1.5 ${className}`} style={style}>
+      <Icon size={18} style={{ color, flexShrink: 0 }} />
+      <span className="italic">
+        <span className="font-semibold" style={{ color: T.ink }}>{label}</span>,{" "}
+        <span className="font-bold" style={{ color: T.ink }}>{displayNameOf(session)}</span>
+      </span>
     </span>
   );
 }
@@ -2547,7 +2552,7 @@ function AuthScreen({ initialMode = "login" }) {
     resetMessages();
     if (!isValidEmail(email) || !password) { setError("Vui lòng nhập đầy đủ email và mật khẩu."); return; }
     setSubmitting(true);
-    const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
     setSubmitting(false);
     if (err) setError("Email hoặc mật khẩu không đúng.");
   };
@@ -2561,7 +2566,7 @@ function AuthScreen({ initialMode = "login" }) {
     if (password !== confirmPassword) { setError("Mật khẩu nhập lại không khớp."); return; }
     setSubmitting(true);
     const { data, error: err } = await supabase.auth.signUp({
-      email: email.trim(),
+      email: email.trim().toLowerCase(),
       password,
       options: { data: { display_name: displayName.trim() } },
     });
@@ -2580,7 +2585,7 @@ function AuthScreen({ initialMode = "login" }) {
     resetMessages();
     if (!isValidEmail(email)) { setError("Email không hợp lệ."); return; }
     setSubmitting(true);
-    const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
       redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
     });
     setSubmitting(false);
@@ -2708,7 +2713,7 @@ function AuthScreen({ initialMode = "login" }) {
 }
 
 // ---------- Sidebar (web) — cùng khuôn với sidebar app "Việc Của Tôi" ----------
-function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMode, onViewChange, hideAmounts, onHideAmountsChange, session, onLogout }) {
+function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMode, onViewChange, hideAmounts, onHideAmountsChange }) {
   return (
     <aside style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 18 }}>
       <div>
@@ -2747,18 +2752,6 @@ function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMod
           <ViewToggle value={viewMode} onChange={onViewChange} />
           <AmountVisibilityToggle hidden={hideAmounts} onChange={onHideAmountsChange} />
         </div>
-      </div>
-
-      <div className="mt-auto pt-3" style={{ borderTop: `1px solid ${T.border}` }}>
-        <Greeting session={session} className="text-xs block mb-2" style={{ color: T.muted }} />
-        <button
-          type="button"
-          onClick={onLogout}
-          className="w-full flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium"
-          style={{ borderColor: T.border, color: T.rust, background: T.card }}
-        >
-          <LogOut size={13} /> Đăng xuất
-        </button>
       </div>
     </aside>
   );
@@ -3281,10 +3274,22 @@ export default function App() {
           tab={tab} setTab={setTab} tabs={tabs} txCountThisMonth={txCountThisMonth}
           month={month} setMonth={setMonth} viewMode={viewMode} onViewChange={handleViewChange}
           hideAmounts={hideAmounts} onHideAmountsChange={setHideAmounts}
-          session={session} onLogout={handleLogout}
         />
         <main style={{ flex: 1, minWidth: 0 }}>
-          <h2 className="ff-serif" style={{ fontWeight: 600, fontSize: 24, color: T.ink, margin: "4px 0 18px" }}>{currentTabLabel}</h2>
+          <div className="flex items-center justify-between flex-wrap gap-3" style={{ margin: "4px 0 18px" }}>
+            <h2 className="ff-serif" style={{ fontWeight: 600, fontSize: 24, color: T.ink, margin: 0 }}>{currentTabLabel}</h2>
+            <div className="flex items-center gap-3">
+              <Greeting session={session} className="text-sm" style={{ color: T.muted }} />
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium"
+                style={{ borderColor: T.border, color: T.rust, background: T.card }}
+              >
+                <LogOut size={13} /> Đăng xuất
+              </button>
+            </div>
+          </div>
           {content}
         </main>
       </div>
