@@ -722,11 +722,11 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
                 data={byDay}
                 width={dayChartWidth}
                 height={chartUI.chartHeight}
-                margin={{ top: 8, right: 8, left: -4, bottom: 0 }}
+                margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
               >
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
                 <XAxis dataKey="day" tick={{ fontSize: chartUI.axisFont, fill: T.muted }} />
-                <YAxis width={34} tick={{ fontSize: chartUI.axisFont, fill: T.muted }} tickFormatter={(v) => (hideAmounts ? "***" : `${v / 1000000}tr`)} />
+                <YAxis width={44} tick={{ fontSize: chartUI.axisFont, fill: T.muted }} tickFormatter={(v) => mShort(v, hideAmounts)} />
                 <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
                 <Bar dataKey="thu" name="Thu nhập" fill={T.green} radius={[4, 4, 0, 0]} />
                 <Bar dataKey="chi" name="Chi tiêu" fill={T.olive} radius={[4, 4, 0, 0]} />
@@ -736,10 +736,10 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
         ) : (
           <div style={{ width: "100%", height: chartUI.chartHeight }}>
             <ResponsiveContainer>
-              <BarChart data={byDay} margin={{ top: 8, right: 8, left: -4, bottom: 0 }}>
+              <BarChart data={byDay} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
                 <XAxis dataKey="day" tick={{ fontSize: chartUI.axisFont, fill: T.muted }} />
-                <YAxis width={34} tick={{ fontSize: chartUI.axisFont, fill: T.muted }} tickFormatter={(v) => (hideAmounts ? "***" : `${v / 1000000}tr`)} />
+                <YAxis width={44} tick={{ fontSize: chartUI.axisFont, fill: T.muted }} tickFormatter={(v) => mShort(v, hideAmounts)} />
                 <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
                 <Legend wrapperStyle={{ fontSize: chartUI.legendFont, color: T.muted }} />
                 <Bar dataKey="thu" name="Thu nhập" fill={T.green} radius={[4, 4, 0, 0]} />
@@ -919,10 +919,10 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
         ) : (
           <div style={{ width: "100%", height: chartUI.chartHeight }}>
             <ResponsiveContainer>
-              <BarChart data={budgetVsActual} margin={{ top: 10, right: 8, left: -4, bottom: 0 }}>
+              <BarChart data={budgetVsActual} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
                 <XAxis dataKey="name" tick={{ fontSize: chartUI.categoryAxisFont, fill: T.muted }} interval={0} angle={chartUI.xAngle} textAnchor="end" height={chartUI.xHeight} />
-                <YAxis width={34} domain={[0, budgetChartMax]} tick={{ fontSize: chartUI.axisFont, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
+                <YAxis width={44} domain={[0, budgetChartMax]} tick={{ fontSize: chartUI.axisFont, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
                 <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
                 <Legend wrapperStyle={{ fontSize: chartUI.legendFont, color: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
                 <Bar dataKey="Hạn mức" fill={T.sage} radius={[4, 4, 0, 0]}>
