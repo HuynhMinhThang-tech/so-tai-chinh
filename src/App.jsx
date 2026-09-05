@@ -9,6 +9,7 @@ import {
   Plus, Pencil, Trash2, LayoutGrid, GitBranch, NotebookPen, X, Check,
   Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, ArrowLeftRight, AlertTriangle, Search, Download,
   LogOut, Mail, Lock, UserCircle2, Loader2, Sun, CloudSun, Moon,
+  Users, ShieldCheck, ShieldOff, MailCheck,
 } from "lucide-react";
 
 // ---------- Theme: DÙNG CHUNG bảng màu & font với app "Việc Của Tôi" ----------
@@ -2764,6 +2765,337 @@ function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMod
   );
 }
 
+// ---------- Tab: Người dùng (chỉ admin thấy) ----------
+// Danh sách toàn bộ tài khoản đã đăng ký (email, thời điểm tạo, đã xác nhận email chưa),
+// cho phép admin: xác nhận email hộ (dành cho app thử nghiệm, người dùng gõ nhầm/không bấm
+// link xác nhận), cấp/thu hồi quyền admin cho tài khoản khác, và xoá hẳn 1 tài khoản (kèm
+// toàn bộ dữ liệu thu/chi của họ, nhờ "on delete cascade" trong schema). Toàn bộ thao tác đi
+// qua các hàm RPC "security definer" (xem schema.sql) — hàm tự kiểm tra quyền admin ngay
+// trong Postgres, nên không ai giả mạo được dù có đọc được code phía client.
+// Vòng tròn avatar chữ cái đầu — màu suy ra từ email, giống cách "colorFor" tô màu danh mục,
+// để mỗi người dùng có 1 màu ổn định, dễ phân biệt khi danh sách dài ra.
+function UserAvatar({ email, size = 36 }) {
+  const letter = (email || "?").trim().charAt(0).toUpperCase();
+  const color = colorFor(email || "");
+  return (
+    <div
+      className="rounded-full flex items-center justify-center shrink-0 font-semibold"
+      style={{ width: size, height: size, background: `${color}22`, color, fontSize: size * 0.4 }}
+    >
+      {letter}
+    </div>
+  );
+}
+
+// Thẻ số liệu ở đầu tab — tổng số tài khoản / số đã xác nhận / số đang chờ xác nhận / số admin.
+// Cùng khuôn với KpiCard đang dùng ở tab "Tổng quan" (viền trái màu, giá trị lớn ff-mono),
+// để nhìn đồng bộ với phần còn lại của app.
+function UserStatCard({ icon: Icon, label, value, accent }) {
+  return (
+    <div className="rounded-2xl bg-white p-4 h-full" style={{ borderLeft: `3px solid ${accent}` }}>
+      <div className="flex items-center gap-2 mb-2">
+        <Icon size={15} style={{ color: accent }} />
+      </div>
+      <p className="text-2xl font-medium ff-mono" style={{ color: T.ink }}>{value}</p>
+      <p className="text-xs mt-0.5" style={{ color: T.muted }}>{label}</p>
+    </div>
+  );
+}
+
+function UsersTab({ currentUserId, viewMode = "web" }) {
+  const mobile = viewMode === "app";
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState("");
+  const [actionErr, setActionErr] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null); // { id, email } | null
+  const [roleFilter, setRoleFilter] = useState("all"); // "all" | "user" | "admin"
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 5;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadErr("");
+    const { data, error } = await supabase.rpc("list_all_profiles");
+    if (error) { setLoadErr(error.message); setLoading(false); return; }
+    setRows(data || []);
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const runAction = async (id, fn) => {
+    setActionErr("");
+    setBusyId(id);
+    const { error } = await fn();
+    if (error) setActionErr(error.message);
+    else await load();
+    setBusyId(null);
+  };
+
+  const confirmEmail = (id) => runAction(id, () => supabase.rpc("confirm_user_email", { target_user_id: id }));
+  const toggleAdmin = (id, role) => runAction(id, () => supabase.rpc("set_user_role", { target_user_id: id, new_role: role === "admin" ? "user" : "admin" }));
+  const performDelete = async () => {
+    const target = confirmDelete;
+    setConfirmDelete(null);
+    if (target) await runAction(target.id, () => supabase.rpc("delete_user_account", { target_user_id: target.id }));
+  };
+
+  // Định dạng gọn: "9 Thg 4, 2026 · 15:44" thay vì chuỗi mặc định dài dòng của trình duyệt.
+  const fmtDate = (iso) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return `${dayLabel(localISODate(d))} · ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+  };
+
+  const confirmedCount = rows.filter((u) => !!u.email_confirmed_at).length;
+  const pendingCount = rows.length - confirmedCount;
+  const adminCount = rows.filter((u) => u.role === "admin").length;
+
+  // Chuẩn hoá chuỗi để tìm không phân biệt hoa/thường và không phân biệt dấu tiếng Việt
+  // (VD: gõ "thang" vẫn tìm ra "Thắng") — cùng cách EntryTab đang xử lý ô tìm kiếm nhật ký.
+  const normalizeSearch = (s) =>
+    (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+  const searchNormalized = normalizeSearch(search.trim());
+
+  const filteredRows = useMemo(() => {
+    return rows.filter((u) => {
+      if (roleFilter !== "all" && u.role !== roleFilter) return false;
+      if (!searchNormalized) return true;
+      return (
+        normalizeSearch(u.email).includes(searchNormalized) ||
+        normalizeSearch(u.display_name || "").includes(searchNormalized)
+      );
+    });
+  }, [rows, roleFilter, searchNormalized]);
+
+  useEffect(() => { setPage(1); }, [roleFilter, searchNormalized]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const pageSafe = Math.min(page, totalPages);
+  const pagedRows = filteredRows.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
+
+  return (
+    <div className="space-y-4">
+      {actionErr && (
+        <div className="rounded-lg px-3 py-2 text-xs flex items-center gap-1.5" style={{ background: T.rustSoft, color: T.rust }}>
+          <AlertTriangle size={13} className="shrink-0" /> {actionErr}
+        </div>
+      )}
+
+      {!loading && !loadErr && rows.length > 0 && (
+        <div className={`grid gap-3 items-stretch ${mobile ? "grid-cols-2" : "grid-cols-4"}`}>
+          <UserStatCard icon={Users} label="Tổng tài khoản" value={rows.length} accent={T.green} />
+          <UserStatCard icon={MailCheck} label="Đã xác nhận email" value={confirmedCount} accent={T.sage} />
+          <UserStatCard icon={Mail} label="Chờ xác nhận" value={pendingCount} accent={pendingCount > 0 ? T.olive : T.muted} />
+          <UserStatCard icon={ShieldCheck} label="Quản trị viên" value={adminCount} accent={T.rust} />
+        </div>
+      )}
+
+      <div className="rounded-2xl bg-white p-4">
+        <div className={mobile ? "space-y-2.5 mb-3" : "flex items-center justify-between gap-2 mb-3"}>
+          <h3 className="text-sm font-medium flex items-center gap-1.5 shrink-0" style={{ color: T.ink }}>
+            <Users size={15} style={{ color: T.green }} /> Danh sách người dùng
+          </h3>
+          <div className={mobile ? "space-y-2" : "flex items-center gap-2"}>
+            <div className="relative">
+              <Search size={13} style={{ color: T.muted, position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Tìm theo tên hoặc email..."
+                className={`rounded-lg border pl-7 pr-7 py-1.5 text-xs focus:outline-none ${mobile ? "w-full" : ""}`}
+                style={{ borderColor: T.border, color: T.ink, background: T.card, width: mobile ? undefined : 200 }}
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  aria-label="Xoá tìm kiếm"
+                  className="absolute"
+                  style={{ right: 7, top: "50%", transform: "translateY(-50%)", color: T.muted }}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            <div className={`inline-flex rounded-full p-0.5 gap-0.5 ${mobile ? "w-full" : ""}`} style={{ background: "#E4E7DC" }}>
+              {[
+                { key: "all", label: "Tất cả" },
+                { key: "user", label: "User" },
+                { key: "admin", label: "Admin" },
+              ].map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setRoleFilter(opt.key)}
+                  className={`text-xs font-semibold px-2.5 py-1.5 rounded-full whitespace-nowrap ${mobile ? "flex-1" : ""}`}
+                  style={{
+                    border: "none", cursor: "pointer",
+                    background: roleFilter === opt.key ? T.ink : "transparent",
+                    color: roleFilter === opt.key ? "#fff" : T.muted,
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-10" style={{ color: T.muted }}>
+            <Loader2 size={16} className="animate-spin" /> <span className="text-sm">Đang tải danh sách...</span>
+          </div>
+        ) : loadErr ? (
+          <p className="text-sm py-8 text-center" style={{ color: T.rust }}>Lỗi: {loadErr}</p>
+        ) : filteredRows.length === 0 ? (
+          <p className="text-sm py-8 text-center" style={{ color: T.muted }}>
+            {rows.length === 0 ? "Chưa có tài khoản nào." : "Không có tài khoản nào khớp bộ lọc."}
+          </p>
+        ) : (
+          <div className="space-y-2.5">
+            {pagedRows.map((u) => {
+              const isSelf = u.id === currentUserId;
+              const isAdminRow = u.role === "admin";
+              const confirmed = !!u.email_confirmed_at;
+              const isBusy = busyId === u.id;
+              return (
+                <div
+                  key={u.id}
+                  className="rounded-xl p-3.5 transition-colors"
+                  style={{ border: `1px solid ${T.border}`, background: "#fff" }}
+                >
+                  <div className={`flex gap-3 ${mobile ? "flex-col" : "items-center justify-between"}`}>
+                    <div className="flex items-start gap-3 min-w-0">
+                      <UserAvatar email={u.email} />
+                      <div className="min-w-0 pt-0.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-sm font-semibold truncate" style={{ color: T.ink }}>
+                            {u.display_name || u.email}
+                          </p>
+                          {isSelf && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: T.oliveSoft, color: T.olive }}>
+                              Bạn
+                            </span>
+                          )}
+                          {isAdminRow ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: T.rustSoft, color: T.rust }}>
+                              <ShieldCheck size={10} /> Admin
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: T.page, color: T.muted }}>
+                              <UserCircle2 size={10} /> User
+                            </span>
+                          )}
+                        </div>
+                        {u.display_name && (
+                          <p className="text-xs truncate mt-0.5" style={{ color: T.muted }}>{u.email}</p>
+                        )}
+                        <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                          <span
+                            className="inline-flex items-center gap-1 text-[10.5px] font-medium px-2 py-0.5 rounded-full"
+                            style={confirmed ? { background: T.greenSoft, color: T.green } : { background: T.oliveSoft, color: T.olive }}
+                          >
+                            {confirmed ? <MailCheck size={10} /> : <Mail size={10} />}
+                            {confirmed ? "Đã xác nhận email" : "Chưa xác nhận email"}
+                          </span>
+                        </div>
+                        <div className="mt-2 space-y-1.5 pl-2" style={{ borderLeft: `2px solid ${T.border}` }}>
+                          <div className={mobile ? "text-[11px]" : "flex items-center gap-1.5 text-[11px]"}>
+                            <span className="shrink-0 block" style={{ color: T.muted, minWidth: mobile ? "auto" : 118 }}>Tham gia</span>
+                            <span className="ff-mono block" style={{ color: T.ink }}>{fmtDate(u.created_at)}</span>
+                          </div>
+                          {u.last_sign_in_at && (
+                            <div className={mobile ? "text-[11px]" : "flex items-center gap-1.5 text-[11px]"}>
+                              <span className="shrink-0 block" style={{ color: T.muted, minWidth: mobile ? "auto" : 118 }}>Đăng nhập gần nhất</span>
+                              <span className="ff-mono block" style={{ color: T.ink }}>{fmtDate(u.last_sign_in_at)}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={`flex items-center gap-1.5 shrink-0 ${mobile ? "flex-wrap pl-[48px]" : ""}`}>
+                      {!confirmed && (
+                        <button
+                          disabled={isBusy} onClick={() => confirmEmail(u.id)}
+                          title="Xác nhận email hộ người dùng"
+                          className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium disabled:opacity-40 transition-colors"
+                          style={{ borderColor: T.green, color: T.green, background: T.card }}
+                        >
+                          {isBusy ? <Loader2 size={13} className="animate-spin" /> : <MailCheck size={13} />} Xác nhận email
+                        </button>
+                      )}
+                      {!isSelf && (
+                        <button
+                          disabled={isBusy} onClick={() => toggleAdmin(u.id, u.role)}
+                          title={isAdminRow ? "Thu hồi quyền admin" : "Cấp quyền admin"}
+                          className="w-8 h-8 rounded-lg border flex items-center justify-center disabled:opacity-40 transition-colors"
+                          style={{ borderColor: T.border, color: T.ink, background: T.card }}
+                        >
+                          {isAdminRow ? <ShieldOff size={14} /> : <ShieldCheck size={14} />}
+                        </button>
+                      )}
+                      {!isSelf && (
+                        <button
+                          disabled={isBusy} onClick={() => setConfirmDelete({ id: u.id, email: u.email })}
+                          title="Xoá tài khoản"
+                          className="w-8 h-8 rounded-lg border flex items-center justify-center disabled:opacity-40 transition-colors"
+                          style={{ borderColor: T.border, color: T.rust, background: T.card }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {!loading && !loadErr && filteredRows.length > PAGE_SIZE && (
+          <div className={`flex items-center justify-between gap-2 mt-4 pt-3 ${mobile ? "flex-col" : ""}`} style={{ borderTop: `1px solid ${T.border}` }}>
+            <p className="text-xs" style={{ color: T.muted }}>
+              Trang {pageSafe}/{totalPages} · {filteredRows.length} tài khoản
+            </p>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={pageSafe <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="rounded-lg border px-2.5 py-1.5 text-xs font-medium disabled:opacity-40"
+                style={{ borderColor: T.border, color: T.ink, background: T.card }}
+              >
+                Trước
+              </button>
+              <button
+                type="button"
+                disabled={pageSafe >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="rounded-lg border px-2.5 py-1.5 text-xs font-medium disabled:opacity-40"
+                style={{ borderColor: T.border, color: T.ink, background: T.card }}
+              >
+                Sau
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <ConfirmModal
+        open={!!confirmDelete}
+        title="Xoá tài khoản"
+        message={`Xoá vĩnh viễn tài khoản "${confirmDelete?.email}"? Toàn bộ dữ liệu thu chi của tài khoản này sẽ bị xoá theo và không thể khôi phục.`}
+        onConfirm={performDelete}
+        onCancel={() => setConfirmDelete(null)}
+      />
+    </div>
+  );
+}
+
 // ---------- App ----------
 export default function App() {
   const [month, setMonth] = useState(THIS_MONTH);
@@ -2791,6 +3123,15 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false); // đã xác định xong có phiên hay không
   const [authScreenMode, setAuthScreenMode] = useState("login"); // ép về "reset" khi có link đặt lại mật khẩu
+
+  // ---- Profile của chính người đang đăng nhập (để biết có phải admin không) ----
+  const [myProfile, setMyProfile] = useState(null);
+  const isAdmin = myProfile?.role === "admin";
+  const fetchMyProfile = useCallback(async (uid) => {
+    if (!supabase || !uid) { setMyProfile(null); return; }
+    const { data, error } = await supabase.from("profiles").select("*").eq("id", uid).single();
+    if (!error) setMyProfile(data);
+  }, []);
 
   // Nếu mốc "đăng nhập lúc" đã lưu quá 24 giờ -> tự đăng xuất, buộc nhập lại thông tin.
   const enforceSessionExpiry = useCallback((sess) => {
@@ -2873,13 +3214,15 @@ export default function App() {
   useEffect(() => {
     if (session) {
       fetchAll();
+      fetchMyProfile(session.user.id);
     } else {
       // Đã đăng xuất (hoặc chưa đăng nhập) -> xoá sạch dữ liệu đang giữ trên UI, tránh lộ dữ
       // liệu tài chính của phiên trước cho lần đăng nhập kế tiếp trên cùng thiết bị.
       setTransactions([]); setCategories({ income: [], expense: [] }); setBudgets({});
       setWalletTransfers([]); setBudgetTransfers([]); setLoading(false);
+      setMyProfile(null);
     }
-  }, [session, fetchAll]);
+  }, [session, fetchAll, fetchMyProfile]);
 
   /* ---------- handlers: mỗi hàm cập nhật UI ngay, rồi đồng bộ với Supabase ---------- */
   const addTransaction = async (record) => {
@@ -3073,6 +3416,7 @@ export default function App() {
     { id: "flow", label: "Trực quan dòng tiền", shortLabel: "Dòng tiền", icon: GitBranch },
     { id: "entry", label: "Ghi chép thu chi", shortLabel: "Ghi chép", icon: NotebookPen },
     { id: "budget", label: "Lập ngân sách", shortLabel: "Ngân sách", icon: Target },
+    ...(isAdmin ? [{ id: "users", label: "Người dùng", shortLabel: "Người dùng", icon: Users }] : []),
   ];
   const currentTabLabel = tabs.find((t) => t.id === tab)?.label;
   const txCountThisMonth = transactions.filter((t) => t.date.startsWith(month)).length;
@@ -3178,6 +3522,11 @@ export default function App() {
           onAddWalletTransfer={addWalletTransfer} onDeleteWalletTransfer={deleteWalletTransfer}
         />
       </div>
+      {isAdmin && (
+        <div style={{ display: tab === "users" ? "block" : "none" }}>
+          <UsersTab currentUserId={session.user.id} viewMode={viewMode === "app" ? "app" : "web"} />
+        </div>
+      )}
     </>
   );
 
