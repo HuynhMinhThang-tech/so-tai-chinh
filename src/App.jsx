@@ -197,6 +197,15 @@ function colorFor(name, index) {
 }
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
+// ---------- Thứ trong tuần (dùng cho biểu đồ "Chi tiêu theo thứ trong tuần" ở tab Tổng quan) ----------
+// Thứ tự hiển thị: Thứ 2 -> Chủ nhật, khớp với Date.getDay() (0 = Chủ nhật, 1 = Thứ 2, ..., 6 = Thứ 7).
+const VN_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const VN_WEEKDAY_LABELS = { 1: "Thứ 2", 2: "Thứ 3", 3: "Thứ 4", 4: "Thứ 5", 5: "Thứ 6", 6: "Thứ 7", 0: "Chủ nhật" };
+function weekdayOf(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+
 // ============================================================
 // ĐĂNG NHẬP / ĐĂNG KÝ / PHIÊN ĐĂNG NHẬP (Supabase Auth)
 // ------------------------------------------------------------
@@ -502,8 +511,227 @@ function ConfirmModal({ open, title = "Xác nhận xoá", message, confirmLabel 
   );
 }
 
+// ---------- Ô chọn dùng cho bộ lọc của biểu đồ "Chi tiêu theo thứ trong tuần" ----------
+function FilterSelect({ label, value, onChange, options, placeholder, disabled, allowEmpty = true }) {
+  return (
+    <div>
+      <label className="text-[11px] font-semibold block mb-1" style={{ color: T.muted, letterSpacing: 0.3 }}>{label}</label>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none disabled:opacity-50"
+        style={{ borderColor: T.border, color: T.ink, background: T.card }}
+      >
+        {allowEmpty && <option value="">{placeholder}</option>}
+        {options.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
+      </select>
+    </div>
+  );
+}
+
+// ---------- "Chi tiêu theo thứ trong tuần" — biểu đồ có thể "khoan sâu" (drill-down) ----------
+// Bấm vào 1 cột "thứ" -> đổi trục X sang xem theo DANH MỤC của đúng thứ đó.
+// Bấm tiếp vào 1 cột danh mục -> đổi trục X sang xem theo CHI TIẾT của đúng danh mục đó.
+// 3 bộ lọc (Tháng / Danh mục / Chi tiết) ở trên LUÔN hiển thị dù đang ở mức xem nào — đổi bất
+// kỳ bộ lọc nào cũng sẽ tự quay về mức xem "theo thứ" ban đầu (reset phần đã khoan sâu).
+// Biểu đồ này CỐ Ý dùng bảng màu TRUNG TÍNH riêng (không dùng xanh lá "thu nhập" hay đỏ "chi
+// vượt"/cảnh báo của app) — tránh gây hiểu lầm rằng các cột ở đây mang ý nghĩa tốt/xấu.
+const NEUTRAL_BAR_COLORS = ["#2B2F27", "#454B3E", "#5F6656", "#7A8168", "#959B81", "#B1B6A0", "#CBCDBB"];
+function neutralColorFor(name, index) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+  return NEUTRAL_BAR_COLORS[Math.abs(h + (index || 0)) % NEUTRAL_BAR_COLORS.length];
+}
+function WeekdaySpendingCard({ transactions, categories, month, hideAmounts, viewMode = "web" }) {
+  const mobile = viewMode === "app";
+  const chartUI = {
+    axisFont: mobile ? 9 : 11,
+    labelFont: mobile ? 9 : 11,
+    chartHeight: mobile ? 230 : 260,
+  };
+
+  // Danh sách các tháng có phát sinh chi tiêu, để đổ vào bộ lọc "THÁNG" (luôn có tháng hiện tại).
+  const availableMonths = useMemo(() => {
+    const set = new Set(transactions.filter((t) => t.type === "expense").map((t) => t.date.slice(0, 7)));
+    set.add(month);
+    return Array.from(set).sort().reverse();
+  }, [transactions, month]);
+
+  const [filterMonth, setFilterMonth] = useState(month);
+  const [filterCategory, setFilterCategory] = useState("");
+  const [filterSubcategory, setFilterSubcategory] = useState("");
+  // Mức đang "khoan sâu" tới: drillDay = thứ đang chọn (0-6), drillCategory = danh mục đang chọn.
+  const [drillDay, setDrillDay] = useState(null);
+  const [drillCategory, setDrillCategory] = useState(null);
+
+  // "Chi tiết" chỉ có lựa chọn khi đã chọn 1 "Danh mục" cụ thể.
+  const subOptionsForFilter = useMemo(() => {
+    if (!filterCategory) return [];
+    const cat = categories.expense.find((c) => c.name === filterCategory);
+    return cat ? cat.subs : [];
+  }, [categories, filterCategory]);
+
+  const resetDrill = () => { setDrillDay(null); setDrillCategory(null); };
+  const handleMonthChange = (v) => { setFilterMonth(v); resetDrill(); };
+  const handleCategoryChange = (v) => { setFilterCategory(v); setFilterSubcategory(""); resetDrill(); };
+  const handleSubcategoryChange = (v) => { setFilterSubcategory(v); resetDrill(); };
+
+  // Tập giao dịch CHI TIÊU khớp với 3 bộ lọc phía trên (chưa tính phần khoan sâu theo thứ).
+  const baseFiltered = useMemo(() => transactions.filter((t) =>
+    t.type === "expense" &&
+    t.date.startsWith(filterMonth) &&
+    (!filterCategory || t.category === filterCategory) &&
+    (!filterSubcategory || t.subcategory === filterSubcategory)
+  ), [transactions, filterMonth, filterCategory, filterSubcategory]);
+
+  // Số cấp còn có thể khoan sâu thêm, tuỳ theo bộ lọc Danh mục/Chi tiết đang chọn:
+  //  - Chưa chọn gì            -> khoan được 2 cấp (thứ -> danh mục -> chi tiết)
+  //  - Đã chọn Danh mục        -> khoan được 1 cấp (thứ -> chi tiết, vì danh mục đã cố định)
+  //  - Đã chọn cả 2            -> không khoan thêm được nữa (đã ở mức chi tiết nhất)
+  const maxDepth = filterSubcategory ? 0 : filterCategory ? 1 : 2;
+
+  const dayFiltered = useMemo(() => {
+    if (drillDay === null) return null;
+    return baseFiltered.filter((t) => weekdayOf(t.date) === drillDay);
+  }, [baseFiltered, drillDay]);
+
+  let level = 0;
+  if (drillDay !== null) level = 1;
+  if (drillDay !== null && drillCategory !== null) level = 2;
+
+  const chartData = useMemo(() => {
+    if (level === 0) {
+      const totals = {};
+      VN_WEEKDAY_ORDER.forEach((wd) => (totals[wd] = 0));
+      baseFiltered.forEach((t) => { totals[weekdayOf(t.date)] += t.amount; });
+      return VN_WEEKDAY_ORDER.map((wd) => ({ key: wd, name: VN_WEEKDAY_LABELS[wd], value: totals[wd], color: T.ink }));
+    }
+    if (level === 1) {
+      // Nếu chưa chọn Danh mục ở bộ lọc trên -> khoan theo danh mục; nếu đã chọn rồi (cố định
+      // 1 danh mục) thì khoan thẳng theo chi tiết luôn (không cần thêm 1 cú bấm nữa).
+      const groupByCategory = !filterCategory;
+      const totals = {};
+      (dayFiltered || []).forEach((t) => {
+        const key = groupByCategory ? t.category : (t.subcategory || "Khác");
+        totals[key] = (totals[key] || 0) + t.amount;
+      });
+      return Object.entries(totals).map(([name, value], i) => ({ name, value, color: neutralColorFor(name, i) })).sort((a, b) => b.value - a.value);
+    }
+    const totals = {};
+    (dayFiltered || []).filter((t) => t.category === drillCategory).forEach((t) => {
+      const key = t.subcategory || "Khác";
+      totals[key] = (totals[key] || 0) + t.amount;
+    });
+    return Object.entries(totals).map(([name, value], i) => ({ name, value, color: neutralColorFor(name, i) })).sort((a, b) => b.value - a.value);
+  }, [level, baseFiltered, dayFiltered, filterCategory, drillCategory]);
+
+  const total = useMemo(() => chartData.reduce((s, d) => s + d.value, 0), [chartData]);
+
+  const canDrillFurther = level < maxDepth;
+
+  const handleBarClick = (data) => {
+    if (!canDrillFurther || !data) return;
+    const entry = data.payload || data;
+    if (level === 0) setDrillDay(entry.key);
+    else if (level === 1 && !filterCategory) setDrillCategory(entry.name);
+  };
+
+  const title = level === 0
+    ? "Chi tiêu theo thứ trong tuần"
+    : level === 1
+      ? `Chi tiêu theo ${filterCategory ? "chi tiết" : "danh mục"} — ${VN_WEEKDAY_LABELS[drillDay]}`
+      : `Chi tiêu theo chi tiết — ${drillCategory}`;
+
+  return (
+    <div className="rounded-2xl bg-white p-4">
+      <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+        <h3 className="text-sm font-medium" style={{ color: T.ink }}>{title}</h3>
+        <p className="text-2xl font-medium ff-mono shrink-0" style={{ color: T.ink }}>{mfmt(total, hideAmounts)}</p>
+      </div>
+
+      <div className={`grid gap-3 mb-3 ${mobile ? "grid-cols-1" : "grid-cols-3"}`}>
+        <FilterSelect
+          label="THÁNG"
+          value={filterMonth}
+          onChange={handleMonthChange}
+          options={availableMonths.map((ym) => ({ value: ym, label: monthLabel(ym) }))}
+          allowEmpty={false}
+        />
+        <FilterSelect
+          label="DANH MỤC"
+          value={filterCategory}
+          onChange={handleCategoryChange}
+          options={categories.expense.map((c) => ({ value: c.name, label: c.name }))}
+          placeholder="Tất cả danh mục"
+        />
+        <FilterSelect
+          label="CHI TIẾT"
+          value={filterSubcategory}
+          onChange={handleSubcategoryChange}
+          options={subOptionsForFilter.map((s) => ({ value: s, label: s }))}
+          placeholder={filterCategory ? "Tất cả chi tiết" : "— Chọn danh mục trước —"}
+          disabled={!filterCategory}
+        />
+      </div>
+
+      {level > 0 && (
+        <div className="flex items-center gap-1.5 text-xs mb-3 flex-wrap">
+          <button type="button" onClick={resetDrill} className="font-medium" style={{ color: T.green }}>Tất cả</button>
+          <ChevronRight size={12} style={{ color: T.muted }} />
+          <button
+            type="button"
+            onClick={() => setDrillCategory(null)}
+            className="font-medium"
+            style={{ color: level === 1 ? T.ink : T.green }}
+          >
+            {VN_WEEKDAY_LABELS[drillDay]}
+          </button>
+          {level === 2 && (
+            <>
+              <ChevronRight size={12} style={{ color: T.muted }} />
+              <span className="font-medium" style={{ color: T.ink }}>{drillCategory}</span>
+            </>
+          )}
+        </div>
+      )}
+
+      {chartData.length === 0 || total === 0 ? (
+        <p className="text-sm py-10 text-center" style={{ color: T.muted }}>Chưa có dữ liệu phù hợp với bộ lọc hiện tại.</p>
+      ) : (
+        <div style={{ width: "100%", height: chartUI.chartHeight }} className="mt-2">
+          <ResponsiveContainer>
+            <BarChart data={chartData} margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: chartUI.axisFont, fill: T.muted }}
+                interval={0}
+                angle={mobile ? -30 : 0}
+                textAnchor={mobile ? "end" : "middle"}
+                height={mobile ? 50 : 30}
+              />
+              <YAxis width={44} tick={{ fontSize: chartUI.axisFont, fill: T.muted }} tickFormatter={(v) => mShort(v, hideAmounts)} />
+              <Tooltip cursor={{ fill: T.border, opacity: 0.45 }} formatter={(v) => [mfmt(v, hideAmounts), "Số tiền"]} />
+              <Bar
+                dataKey="value"
+                radius={[4, 4, 0, 0]}
+                onClick={handleBarClick}
+                cursor={canDrillFurther ? "pointer" : "default"}
+              >
+                <LabelList dataKey="value" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: T.muted }} />
+                {chartData.map((entry, i) => (<Cell key={i} fill={entry.color} />))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- Tab 1: Overview ----------
-function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "web", walletBalances, isActive = true, cumulativeUnallocated, carryOverBalance = 0 }) {
+function OverviewTab({ transactions, month, budgets, categories, hideAmounts, viewMode = "web", walletBalances, isActive = true, cumulativeUnallocated, carryOverBalance = 0 }) {
   const mobile = viewMode === "app";
   // Kích thước chữ / góc nghiêng trục biểu đồ co giãn theo giao diện đang xem: ở "app"
   // (màn hình hẹp) chữ cần nhỏ hơn và nhãn trục X cần nghiêng nhiều hơn để không bị chật/đè chữ.
@@ -937,6 +1165,8 @@ function OverviewTab({ transactions, month, budgets, hideAmounts, viewMode = "we
           </div>
         )}
       </div>
+
+      <WeekdaySpendingCard transactions={transactions} categories={categories} month={month} hideAmounts={hideAmounts} viewMode={mobile ? "app" : "web"} />
     </div>
   );
 }
@@ -3494,7 +3724,7 @@ export default function App() {
           ở tab "Tổng quan" bị khởi tạo lại từ đầu mỗi lần quay lại tab đó, có lúc lỡ nhịp đo và
           hiện bảng xếp hạng dài tràn lan cho tới khi tải lại cả trang mới hết. */}
       <div style={{ display: tab === "overview" ? "block" : "none" }}>
-        <OverviewTab transactions={transactions} month={month} budgets={budgets} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} isActive={tab === "overview"} cumulativeUnallocated={cumulativeUnallocated} carryOverBalance={carryOverBalance} />
+        <OverviewTab transactions={transactions} month={month} budgets={budgets} categories={categories} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} isActive={tab === "overview"} cumulativeUnallocated={cumulativeUnallocated} carryOverBalance={carryOverBalance} />
       </div>
       <div style={{ display: tab === "flow" ? "block" : "none" }}>
         <CashFlowTab transactions={transactions} month={month} budgets={budgets} viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts} cumulativeUnallocated={cumulativeUnallocated} carryOverBalance={carryOverBalance} />
