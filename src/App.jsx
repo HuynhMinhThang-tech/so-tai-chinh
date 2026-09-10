@@ -824,14 +824,28 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
   useEffect(() => { setExpandedRankCats(new Set()); }, [month]);
 
   // So sánh hạn mức ngân sách với số tiền đã chi thực tế, theo từng danh mục đã đặt hạn mức
-  const budgetVsActual = useMemo(() => {
+    const budgetVsActual = useMemo(() => {
     const spentMap = {};
     txMonth.filter((t) => t.type === "expense").forEach((t) => { spentMap[t.category] = (spentMap[t.category] || 0) + t.amount; });
-    return Object.entries(mb.categories).map(([name, budget]) => ({
+    const list = Object.entries(mb.categories).map(([name, budget]) => ({
       name,
       "Hạn mức": budget,
       "Đã chi": spentMap[name] || 0,
     }));
+    // Sắp lại theo mức độ CẦN CHÚ Ý, không theo thứ tự nhập liệu nữa:
+    //  rank 0 = VƯỢT ngân sách (đã chi > hạn mức)        -> đưa lên ĐẦU, cần xử lý gấp
+    //  rank 1 = còn dư ngân sách (đã chi < hạn mức)       -> ở GIỮA
+    //  rank 2 = đã chi ĐỦ/HẾT đúng hạn mức (đã chi >= hạn mức, không còn dư) -> đưa xuống CUỐI
+    // Trong cùng 1 nhóm, giữ nguyên thứ tự tương đối ban đầu (theo chỉ số i).
+    const rankOf = (d) => {
+      if (d["Đã chi"] > d["Hạn mức"]) return 0;
+      if (d["Hạn mức"] > 0 && d["Đã chi"] >= d["Hạn mức"]) return 2;
+      return 1;
+    };
+    return list
+      .map((d, i) => ({ d, i, rank: rankOf(d) }))
+      .sort((a, b) => a.rank - b.rank || a.i - b.i)
+      .map((x) => x.d);
   }, [txMonth, mb]);
   const budgetChartMax = useMemo(
     () => niceMax(budgetVsActual.reduce((m, d) => Math.max(m, d["Hạn mức"], d["Đã chi"]), 0)),
@@ -841,6 +855,8 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
   // SAU (mới): dùng thẳng số "Chưa phân bổ" LŨY KẾ được App tính sẵn và truyền xuống —
   // xem computeCumulativeUnallocated ở đầu file để biết công thức đầy đủ.
   const unallocatedBudget = cumulativeUnallocated;
+  const budgetColWidth = 100; // độ rộng ước lượng cho 1 danh mục (2 cột Hạn mức/Đã chi + nhãn)
+  const budgetChartWidth = Math.max(budgetVsActual.length * budgetColWidth, budgetColWidth * 5);
 
   const byDay = useMemo(() => {
     const days = {};
@@ -1145,6 +1161,39 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
         </div>
         {budgetVsActual.length === 0 ? (
           <p className="text-sm py-10 text-center" style={{ color: T.muted }}>Chưa đặt hạn mức ngân sách cho danh mục nào trong tháng này.</p>
+        ) : mobile ? (
+          <>
+            {/* Chú thích màu đặt CỐ ĐỊNH bên ngoài vùng cuộn ngang — vì <Legend> của Recharts sẽ
+                canh giữa theo TOÀN BỘ chiều rộng biểu đồ (gồm cả phần đã cuộn qua), nên nếu để
+                bên trong nó sẽ bị khuất khỏi màn hình. */}
+            <div className="flex items-center gap-4 mb-2">
+              <span className="flex items-center gap-1.5 text-xs" style={{ color: T.muted }}>
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: T.sage }} /> Hạn mức
+              </span>
+              <span className="flex items-center gap-1.5 text-xs" style={{ color: T.muted }}>
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: T.rust }} /> Đã chi
+              </span>
+            </div>
+            <div style={{ width: "100%", height: chartUI.chartHeight, overflowX: "auto" }}>
+              <BarChart
+                data={budgetVsActual}
+                width={budgetChartWidth}
+                height={chartUI.chartHeight}
+                margin={{ top: 10, right: 8, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
+                <XAxis dataKey="name" tick={{ fontSize: chartUI.categoryAxisFont, fill: T.muted }} interval={0} angle={chartUI.xAngle} textAnchor="end" height={chartUI.xHeight} />
+                <YAxis width={44} domain={[0, budgetChartMax]} tick={{ fontSize: chartUI.axisFont, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
+                <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
+                <Bar dataKey="Hạn mức" fill={T.sage} radius={[4, 4, 0, 0]}>
+                  <LabelList dataKey="Hạn mức" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
+                </Bar>
+                <Bar dataKey="Đã chi" fill={T.rust} radius={[4, 4, 0, 0]}>
+                  <LabelList dataKey="Đã chi" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: T.rust, fontFamily: "'Inter', system-ui, sans-serif" }} />
+                </Bar>
+              </BarChart>
+            </div>
+          </>
         ) : (
           <div style={{ width: "100%", height: chartUI.chartHeight }}>
             <ResponsiveContainer>
