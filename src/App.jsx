@@ -7,7 +7,7 @@ import {
 import {
   Wallet, TrendingUp, TrendingDown, PiggyBank, ChevronDown, ChevronRight,
   Plus, Pencil, Trash2, LayoutGrid, GitBranch, NotebookPen, X, Check,
-  Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, ArrowLeftRight, AlertTriangle, Search, Download,
+  Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, ArrowLeftRight, AlertTriangle, Search, Download, PlusCircle,
   LogOut, Mail, Lock, UserCircle2, Loader2, Sun, CloudSun, Moon,
   Users, ShieldCheck, ShieldOff, MailCheck,
 } from "lucide-react";
@@ -1655,6 +1655,102 @@ function TransferBudgetModal({ open, fromName, maxAmount, targetOptions, hideAmo
   );
 }
 
+// Panel "Thêm vào ngân sách từ Chưa phân bổ": cộng THÊM một khoản vào hạn mức đang có của 1
+// danh mục (VD: Ăn uống đang 300k, thêm 200k -> thành 500k) mà KHÔNG cần bấm "Sửa" rồi tự gõ
+// lại cả con số mới. Khoản cộng thêm được lấy thẳng từ pool "Chưa phân bổ" (tự giảm theo vì
+// "Chưa phân bổ" được tính từ tổng ngân sách đã lập). Số tiền tối đa = "Chưa phân bổ" hiện tại.
+function TopUpBudgetModal({ open, categoryName, currentBudget, maxAmount, hideAmounts, onConfirm, onCancel }) {
+  const [amount, setAmount] = useState("");
+  useEffect(() => {
+    if (open) setAmount("");
+  }, [open, categoryName]);
+  if (!open) return null;
+
+  const formatAmount = (raw) => (raw ? Number(raw).toLocaleString("vi-VN") : "");
+  const available = Math.max(maxAmount, 0);
+  const amountNum = Number(amount) || 0;
+  const exceeds = amount !== "" && amountNum > available;
+  const canSubmit = amountNum > 0 && !exceeds;
+  const submit = () => { if (canSubmit) onConfirm({ amount: amountNum }); };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(32,38,31,0.45)" }}
+      onClick={onCancel}
+    >
+      <div
+        className="rounded-2xl bg-white p-5 w-full max-w-sm"
+        style={{ boxShadow: "0 16px 40px rgba(32,38,31,0.25)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-sm font-semibold mb-1 ff-serif flex items-center gap-1.5" style={{ color: T.ink, fontSize: 16 }}>
+          <PlusCircle size={15} style={{ color: T.green }} /> Thêm từ chưa phân bổ
+        </h3>
+        <p className="text-xs mb-4 leading-relaxed" style={{ color: T.muted }}>
+          Vào <span className="font-medium" style={{ color: T.ink }}>{categoryName}</span> (hiện {mfmt(currentBudget, hideAmounts)}) — chưa phân bổ khả dụng:{" "}
+          <span className="font-semibold" style={{ color: available > 0 ? T.green : T.rust }}>{mfmt(available, hideAmounts)}</span>
+        </p>
+
+        {available <= 0 ? (
+          <p className="text-xs mb-4" style={{ color: T.muted }}>
+            Hiện không còn khoản chưa phân bổ nào để thêm vào danh mục này.
+          </p>
+        ) : (
+          <div>
+            <label className="text-xs mb-1 block" style={{ color: T.muted }}>Số tiền thêm vào</label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  autoFocus type="text" inputMode="numeric" value={formatAmount(amount)}
+                  onChange={(e) => setAmount(e.target.value.replace(/\D/g, ""))}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
+                  placeholder="0" className="w-full rounded-lg border pl-3 pr-9 py-2 text-sm focus:outline-none"
+                  style={{ borderColor: exceeds ? T.rust : T.border, color: T.ink, background: T.card }}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: T.muted }}>đ</span>
+              </div>
+              <button
+                type="button" onClick={() => setAmount(String(Math.floor(available)))}
+                className="rounded-lg border px-3 py-2 text-xs font-medium whitespace-nowrap"
+                style={{ borderColor: T.border, color: T.ink, background: T.card }}
+              >
+                Tối đa
+              </button>
+            </div>
+            {exceeds ? (
+              <p className="text-[11px] mt-1" style={{ color: T.rust }}>
+                Vượt quá số chưa phân bổ — tối đa {mfmt(available, hideAmounts)}.
+              </p>
+            ) : amountNum > 0 ? (
+              <p className="text-[11px] mt-1" style={{ color: T.muted }}>
+                Sau khi thêm: {categoryName} {mfmt(currentBudget + amountNum, hideAmounts)} · Chưa phân bổ còn {mfmt(available - amountNum, hideAmounts)}
+              </p>
+            ) : null}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button type="button" onClick={onCancel} className="rounded-lg border px-3.5 py-2 text-sm font-medium" style={{ borderColor: T.border, color: T.muted, background: T.card }}>
+            Hủy
+          </button>
+          {available > 0 && (
+            <button
+              type="button"
+              disabled={!canSubmit}
+              onClick={submit}
+              className="rounded-lg px-3.5 py-2 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              style={{ background: T.green }}
+            >
+              <Plus size={14} /> Thêm
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Lịch sử các lượt "chuyển ngân sách" giữa 2 danh mục trong tháng đang xem — hiển thị gọn bên
 // dưới danh sách ngân sách theo danh mục, giống cách "Lịch sử chuyển đổi tiền mặt ⇄ tài khoản"
 // hiển thị bên dưới nhật ký ở tab "Ghi chép thu chi". Dùng chung cho cả giao diện Web lẫn App —
@@ -1761,7 +1857,7 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
   const catAmountNum = Number(catForm.amount) || 0;
   const catAmountExceedsMax = catForm.amount !== "" && catAmountNum > maxAllowedAmount;
 
-  useEffect(() => { setCatForm({ category: "", amount: "" }); setEditingCat(null); setAddingNewCat(false); setNewCatName(""); setTransferFrom(null); }, [budgetMonth]);
+  useEffect(() => { setCatForm({ category: "", amount: "" }); setEditingCat(null); setAddingNewCat(false); setNewCatName(""); setTransferFrom(null); setTopUpCat(null); }, [budgetMonth]);
 
   const confirmNewCat = async () => {
     const name = newCatName.trim();
@@ -1814,6 +1910,21 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
     if (amount > transferMaxAmount) return;
     await onTransferBudget(budgetMonth, from, to, amount);
     closeTransfer();
+  };
+
+  // ---- Thêm vào ngân sách một danh mục từ "Chưa phân bổ" (không cần bấm Sửa) ----
+  // Điều kiện: số tiền thêm phải > 0 và <= "Chưa phân bổ" hiện tại (unallocatedNow). Ngân sách
+  // mới = hạn mức hiện có + số thêm, ghi bằng đúng 1 lần upsert — "Chưa phân bổ" tự giảm theo.
+  const [topUpCat, setTopUpCat] = useState(null);
+  const openTopUp = (name) => setTopUpCat(name);
+  const closeTopUp = () => setTopUpCat(null);
+  const topUpMaxAmount = Math.max(unallocatedNow, 0);
+  const confirmTopUp = async ({ amount }) => {
+    const name = topUpCat;
+    if (!name || !(amount > 0)) return;
+    if (amount > topUpMaxAmount) return;
+    await onUpsertBudget(budgetMonth, name, (mb.categories[name] || 0) + amount);
+    closeTopUp();
   };
 
   // Lịch sử chuyển ngân sách CHỈ của tháng đang xem (mỗi lượt chuyển gắn với đúng 1 tháng).
@@ -1954,6 +2065,7 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
                         Vượt ngân sách
                       </span>
                     )}
+                    <button onClick={() => openTopUp(name)} title="Thêm vào ngân sách từ chưa phân bổ" className="p-1.5 rounded-md" style={{ color: T.muted }}><PlusCircle size={13} /></button>
                     {budgetedCats.length > 1 && (
                       <button onClick={() => openTransfer(name)} title="Chuyển ngân sách sang danh mục khác" className="p-1.5 rounded-md" style={{ color: T.muted }}><ArrowLeftRight size={13} /></button>
                     )}
@@ -1982,6 +2094,16 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
         onDelete={onDeleteBudgetTransfer}
         hideAmounts={hideAmounts}
         mobile={mobile}
+      />
+
+      <TopUpBudgetModal
+        open={topUpCat != null}
+        categoryName={topUpCat}
+        currentBudget={topUpCat != null ? (mb.categories[topUpCat] || 0) : 0}
+        maxAmount={topUpMaxAmount}
+        hideAmounts={hideAmounts}
+        onConfirm={confirmTopUp}
+        onCancel={closeTopUp}
       />
 
       <TransferBudgetModal
