@@ -2278,6 +2278,13 @@ function EntryTab({
 
   const txMonth = useMemo(() => transactions.filter((t) => t.date.startsWith(month)).sort((a, b) => b.date.localeCompare(a.date)), [transactions, month]);
   const logFilterMaxDate = useMemo(() => { const end = monthEnd(month); const today = todayISO(); return end < today ? end : today; }, [month]);
+  // Lịch sử chuyển đổi tiền mặt ⇄ tài khoản: chỉ hiển thị các lượt của THÁNG ĐANG XEM (khớp
+  // với tháng của Nhật ký ở trên) — các tháng khác vẫn được lưu đầy đủ trong walletTransfers,
+  // chỉ cần đổi tháng đang xem (bộ chọn tháng chung của trang) là lại thấy ngay.
+  const walletTransfersMonth = useMemo(
+    () => (walletTransfers || []).filter((w) => w.date.startsWith(month)),
+    [walletTransfers, month]
+  );
   useEffect(() => { setLogDateFrom(""); setLogDateTo(""); setLogSearch(""); }, [month]);
   // Chuẩn hoá chuỗi để tìm kiếm không phân biệt hoa/thường và không phân biệt dấu tiếng Việt
   // (VD: gõ "ca phe" vẫn tìm ra "Cà phê").
@@ -2713,7 +2720,7 @@ function EntryTab({
         )}
       </div>
 
-      <WalletTransferHistory walletTransfers={walletTransfers} onDeleteWalletTransfer={onDeleteWalletTransfer} hideAmounts={hideAmounts} mobile={mobile} containerRef={historyCardRef} />
+      <WalletTransferHistory walletTransfers={walletTransfersMonth} month={month} onDeleteWalletTransfer={onDeleteWalletTransfer} hideAmounts={hideAmounts} mobile={mobile} containerRef={historyCardRef} />
       </div>
 
       <ConfirmModal
@@ -2824,7 +2831,7 @@ function WalletTransferPanel({ walletBalances, onAddWalletTransfer, hideAmounts,
 // Trên bản web: chiều cao thẻ này CỐ ĐỊNH (tự đo, vừa khít 5 dòng) — càng chuyển đổi nhiều thì
 // danh sách bên trong tự cuộn dọc, thẻ không phình cao thêm nữa (khớp với cách "Nhật ký" cuộn).
 // Trên bản app: giữ nguyên hành vi cũ (chỉ hiện 8 lượt gần nhất, không cuộn) — không đụng tới.
-function WalletTransferHistory({ walletTransfers, onDeleteWalletTransfer, hideAmounts, mobile, containerRef }) {
+function WalletTransferHistory({ walletTransfers, month, onDeleteWalletTransfer, hideAmounts, mobile, containerRef }) {
   // Số dòng tối đa hiển thị đủ trước khi phải cuộn — bản app giữ đúng kích thước như hiện tại
   // (8 dòng), bản web là 5 dòng.
   const MAX_VISIBLE_ROWS = mobile ? 8 : 5;
@@ -2881,10 +2888,14 @@ function WalletTransferHistory({ walletTransfers, onDeleteWalletTransfer, hideAm
     >
       <div className="flex items-center gap-1.5 mb-2.5 shrink-0">
         <ArrowLeftRight size={13} style={{ color: T.muted }} />
-        <h3 className="text-xs font-medium" style={{ color: T.ink }}>Lịch sử chuyển đổi tiền mặt ⇄ tài khoản</h3>
+        <h3 className="text-xs font-medium" style={{ color: T.ink }}>
+          Lịch sử chuyển đổi tiền mặt ⇄ tài khoản{month ? ` — ${monthLabel(month)}` : ""}
+        </h3>
       </div>
       {recent.length === 0 ? (
-        <p className="text-xs py-2" style={{ color: T.muted }}>Chưa có lượt chuyển đổi nào.</p>
+        <p className="text-xs py-2" style={{ color: T.muted }}>
+          {month ? "Chưa có lượt chuyển đổi nào trong tháng này." : "Chưa có lượt chuyển đổi nào."}
+        </p>
       ) : (
         <div ref={listRef} className="space-y-1.5 flex-1 min-h-0 overflow-y-auto pr-1">
           {recent.map((w, idx) => {
