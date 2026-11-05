@@ -96,6 +96,16 @@ function computeCumulativeBalanceUpTo(transactions, cutoffDate) {
   }, 0);
 }
 const dayLabel = (iso) => { const [y, m, d] = iso.split("-"); return `${parseInt(d, 10)} Thg ${parseInt(m, 10)}, ${y}`; };
+// Định dạng ngày ISO ("yyyy-mm-dd", giá trị lưu trong state/DB) sang "dd/mm/yyyy" để HIỂN THỊ —
+// dùng thống nhất ở mọi nơi in ra ngày dạng số (nhật ký, lịch sử chuyển đổi ví...), không phụ
+// thuộc vào định dạng mặc định mà input[type=date] của từng trình duyệt/hệ điều hành hay dùng
+// (có máy mm/dd/yyyy, có máy yyyy-mm-dd, có máy dd/mm/yyyy — không đồng nhất).
+const formatDateVN = (iso) => {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  if (!y || !m || !d) return "";
+  return `${d}/${m}/${y}`;
+};
 
 // ============================================================
 // CƠ CHẾ "CHƯA PHÂN BỔ" LŨY KẾ (kiểu YNAB — "Ready to Assign")
@@ -468,6 +478,51 @@ function AmountVisibilityToggle({ hidden, onChange, full = false }) {
       {hidden ? <EyeOff size={full ? 13 : 15} /> : <Eye size={full ? 13 : 15} />}
       {full && <span>{hidden ? "Đã ẩn số tiền" : "Ẩn số tiền"}</span>}
     </button>
+  );
+}
+
+// Ô chọn ngày dùng CHUNG cho cả app — vẫn dùng input[type=date] GỐC của trình duyệt bên dưới
+// (giữ nguyên lịch bật lên khi bấm, giới hạn min/max, không cho chọn ngày tương lai...), nhưng
+// phần CHỮ ngày/tháng/năm do trình duyệt tự in ra (mỗi máy một kiểu: có máy mm/dd/yyyy, có máy
+// yyyy-mm-dd...) được ẩn đi (color: "transparent", chỉ ẩn MÀU CHỮ, không đụng tới viền/nền nên ô
+// vẫn có viền + bo góc + nền như input thường) và đè lên bằng một dòng chữ TỰ VIẾT luôn theo
+// đúng "dd/mm/yyyy" (formatDateVN) — nhờ vậy hiển thị thống nhất một kiểu, không phụ thuộc định
+// dạng mặc định của từng trình duyệt/hệ điều hành, mà chức năng chọn ngày vẫn y hệt input ngày
+// bình thường (bấm vào đâu trong ô cũng mở được lịch, vì input gốc phủ kín toàn ô).
+// Kỹ thuật: dùng CSS grid, đặt cả input thật VÀ dòng chữ đè lên CÙNG MỘT Ô LƯỚI (gridArea 1/1)
+// để chúng chồng khít lên nhau — tách riêng "wrapperClassName" (các class quyết định KÍCH
+// THƯỚC/chiếm chỗ trong layout cha, VD "flex-1 min-w-0" hoặc "w-full") khỏi "fieldClassName"
+// (các class thị giác: viền, bo góc, padding, cỡ chữ — áp y hệt cho cả input lẫn dòng chữ đè để
+// 2 lớp luôn khớp kích thước, không lệch pixel).
+function DateInputVN({ value, onChange, min, max, wrapperClassName = "", fieldClassName, style, placeholder = "dd/mm/yyyy", inputRef }) {
+  const display = formatDateVN(value);
+  return (
+    <div className={`grid ${wrapperClassName}`}>
+      <input
+        ref={inputRef}
+        type="date"
+        value={value}
+        min={min}
+        max={max}
+        onChange={onChange}
+        className={fieldClassName}
+        style={{ ...style, gridArea: "1 / 1", color: "transparent" }}
+      />
+      <span
+        className={fieldClassName}
+        style={{
+          gridArea: "1 / 1",
+          pointerEvents: "none",
+          border: "1px solid transparent",
+          background: "transparent",
+          display: "flex",
+          alignItems: "center",
+          color: display ? (style?.color || T.ink) : T.muted,
+        }}
+      >
+        {display || placeholder}
+      </span>
+    </div>
   );
 }
 
@@ -2547,12 +2602,17 @@ function EntryTab({
 
         <div>
           <label className="text-xs mb-1 block" style={{ color: T.muted }}>Ngày</label>
-          <input type="date" value={form.date} max={todayISO()}
+          <DateInputVN
+            value={form.date}
+            max={todayISO()}
             onChange={(e) => {
               const v = e.target.value;
               setForm((f) => ({ ...f, date: v > todayISO() ? todayISO() : v }));
             }}
-            className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none" style={inputStyle} />
+            wrapperClassName="w-full"
+            fieldClassName="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+            style={inputStyle}
+          />
         </div>
 
         <div className="flex gap-2 pt-1">
@@ -2632,23 +2692,23 @@ function EntryTab({
             </div>
             <div className={`flex items-center gap-1.5 text-xs ${mobile ? "w-full" : ""}`} style={{ color: T.muted }}>
               <span className="shrink-0">Từ</span>
-              <input
-                type="date"
+              <DateInputVN
                 value={logDateFrom}
                 min={`${month}-01`}
                 max={logDateTo || logFilterMaxDate}
                 onChange={(e) => setLogDateFrom(e.target.value > logFilterMaxDate ? logFilterMaxDate : e.target.value)}
-                className={`rounded-lg border px-2 py-1 text-xs focus:outline-none ${mobile ? "flex-1 min-w-0" : ""}`}
+                wrapperClassName={mobile ? "flex-1 min-w-0" : "w-[118px]"}
+                fieldClassName="w-full rounded-lg border px-2 py-1 text-xs focus:outline-none"
                 style={{ borderColor: T.border, color: T.ink, background: T.card }}
               />
               <span className="shrink-0">đến</span>
-              <input
-                type="date"
+              <DateInputVN
                 value={logDateTo}
                 min={logDateFrom || `${month}-01`}
                 max={logFilterMaxDate}
                 onChange={(e) => setLogDateTo(e.target.value > logFilterMaxDate ? logFilterMaxDate : e.target.value)}
-                className={`rounded-lg border px-2 py-1 text-xs focus:outline-none ${mobile ? "flex-1 min-w-0" : ""}`}
+                wrapperClassName={mobile ? "flex-1 min-w-0" : "w-[118px]"}
+                fieldClassName="w-full rounded-lg border px-2 py-1 text-xs focus:outline-none"
                 style={{ borderColor: T.border, color: T.ink, background: T.card }}
               />
             </div>
@@ -2704,7 +2764,7 @@ function EntryTab({
                 <span className="w-1.5 h-8 rounded-full shrink-0" style={{ background: t.type === "income" ? T.green : T.rust }} />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium truncate" style={{ color: T.ink }}>{t.category}{t.subcategory ? ` · ${t.subcategory}` : ""}</p>
-                  <p className="text-xs" style={{ color: T.muted }}>{t.date}</p>
+                  <p className="text-xs" style={{ color: T.muted }}>{formatDateVN(t.date)}</p>
                 </div>
                 <PaymentMethodBadge method={t.paymentMethod} />
                 <p className="text-sm font-semibold shrink-0" style={{ color: t.type === "income" ? T.green : T.rust }}>
@@ -2908,7 +2968,7 @@ function WalletTransferHistory({ walletTransfers, month, onDeleteWalletTransfer,
                 className="flex items-center gap-2 text-xs"
                 style={!isLast ? { paddingBottom: 6, borderBottom: `1px solid ${T.border}` } : undefined}
               >
-                <span className="shrink-0" style={{ color: T.muted }}>{w.date}</span>
+                <span className="shrink-0" style={{ color: T.muted }}>{formatDateVN(w.date)}</span>
                 <span className="flex items-center gap-1 flex-1 min-w-0" style={{ color: T.ink }}>
                   {toCash ? <Landmark size={11} style={{ color: T.green }} /> : <Banknote size={11} style={{ color: T.olive }} />}
                   <ArrowLeftRight size={10} style={{ color: T.muted }} />
