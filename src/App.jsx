@@ -7,7 +7,7 @@ import {
 import {
   Wallet, TrendingUp, TrendingDown, PiggyBank, ChevronDown, ChevronRight,
   Plus, Pencil, Trash2, LayoutGrid, GitBranch, NotebookPen, X, Check,
-  Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, ArrowLeftRight, AlertTriangle, Search, Download, PlusCircle,
+  Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, CreditCard, ArrowLeftRight, AlertTriangle, Search, Download, PlusCircle,
   LogOut, Mail, Lock, UserCircle2, Loader2, Sun, CloudSun, Moon,
   Users, ShieldCheck, ShieldOff, MailCheck,
 } from "lucide-react";
@@ -106,6 +106,75 @@ const formatDateVN = (iso) => {
   if (!y || !m || !d) return "";
   return `${d}/${m}/${y}`;
 };
+// Trả về tháng liền SAU "YYYY-MM" của một tháng "YYYY-MM" cho trước (đối xứng với prevMonthOf).
+function nextMonthOf(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m, 1); // m (1-indexed của tháng hiện tại) dùng làm index-0 => chính là tháng sau
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// ============================================================
+// THẺ TÍN DỤNG — kỳ sao kê xoay vòng (KHÔNG cộng dồn vĩnh viễn như ví tiền mặt/tài khoản)
+// ------------------------------------------------------------
+// Khác với tiền mặt/tài khoản (số dư lũy kế mãi mãi), hạn mức thẻ tín dụng được coi là RESET
+// MỖI KỲ SAO KÊ — vì người dùng luôn trả hết nợ kỳ trước ở NGOÀI app (không có cơ chế "thanh
+// toán thẻ" trong app này), nên app chỉ cần biết "đã dùng bao nhiêu trong ĐÚNG kỳ đang xét".
+// Một "kỳ" chạy từ (ngày sau ngày chốt kỳ trước) đến (ngày chốt kỳ này).
+// ============================================================
+
+// Ngày chốt sao kê (đã CLAMP theo số ngày thực có của tháng đó, phòng khi closingDay > số ngày
+// trong tháng, VD closingDay=30 nhưng tháng 2 chỉ có 28 ngày) của tháng "YYYY-MM" cho trước.
+function creditClosingDateOf(ym, closingDay) {
+  const [y, m] = ym.split("-").map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  return localISODate(new Date(y, m - 1, Math.min(closingDay, daysInMonth)));
+}
+// Kỳ sao kê (cycle) CHỨA một ngày ISO cho trước — trả về ngày bắt đầu kỳ và ngày chốt kỳ đó.
+// Nếu dateISO rơi đúng vào ngày chốt, nó thuộc kỳ SẮP chốt hôm đó (không phải kỳ mới bắt đầu).
+function creditCycleForDate(dateISO, closingDay) {
+  const ym = dateISO.slice(0, 7);
+  const thisClose = creditClosingDateOf(ym, closingDay);
+  const closingDate = dateISO <= thisClose ? thisClose : creditClosingDateOf(nextMonthOf(ym), closingDay);
+  const prevClose = creditClosingDateOf(prevMonthOf(closingDate.slice(0, 7)), closingDay);
+  const [py, pm, pd] = prevClose.split("-").map(Number);
+  const cycleStart = localISODate(new Date(py, pm - 1, pd + 1));
+  return { cycleStart, closingDate };
+}
+// Tổng hợp trạng thái thẻ tín dụng để hiển thị ở Tổng quan, tính theo mốc "today" (dạng ISO).
+// settings = { limit, closingDay, graceDays }. Trả về null nếu chưa có settings.
+function getCreditCardStatus(transactions, settings, today) {
+  if (!settings) return null;
+  const { closingDay, graceDays, limit } = settings;
+  const sumInRange = (start, end) =>
+    transactions
+      .filter((t) => t.paymentMethod === "credit" && t.type === "expense" && t.date >= start && t.date <= end)
+      .reduce((s, t) => s + t.amount, 0);
+  const cur = creditCycleForDate(today, closingDay);
+  const used = sumInRange(cur.cycleStart, today);
+  // Ngày cuối cùng của kỳ TRƯỚC kỳ hiện tại = ngay trước ngày bắt đầu kỳ hiện tại.
+  const [cy, cm, cd] = cur.cycleStart.split("-").map(Number);
+  const prevCloseEnd = localISODate(new Date(cy, cm - 1, cd - 1));
+  const prevCycle = creditCycleForDate(prevCloseEnd, closingDay);
+  const lastClosedAmount = sumInRange(prevCycle.cycleStart, prevCloseEnd);
+  const [dy, dm, dd] = prevCloseEnd.split("-").map(Number);
+  const dueDate = localISODate(new Date(dy, dm - 1, dd + graceDays));
+  return {
+    current: {
+      start: cur.cycleStart,
+      closingDate: cur.closingDate,
+      used,
+      limit,
+      available: limit != null ? limit - used : null,
+    },
+    lastClosed: {
+      start: prevCycle.cycleStart,
+      end: prevCloseEnd,
+      amount: lastClosedAmount,
+      dueDate,
+      overdue: lastClosedAmount > 0 && today > dueDate,
+    },
+  };
+}
 
 // ============================================================
 // CƠ CHẾ "CHƯA PHÂN BỔ" LŨY KẾ (kiểu YNAB — "Ready to Assign")
@@ -346,7 +415,7 @@ function mapTransactionRow(row) {
     category: row.category,
     subcategory: row.subcategory || "",
     amount: Number(row.amount),
-    paymentMethod: row.payment_method === "cash" ? "cash" : "bank",
+    paymentMethod: row.payment_method === "cash" ? "cash" : row.payment_method === "credit" ? "credit" : "bank",
   };
 }
 function mapWalletTransferRow(row) {
@@ -398,6 +467,127 @@ function KpiCard({ icon: Icon, label, value, accent, breakdown }) {
               <span className="ff-mono" style={{ color: T.ink }}>{b.value}</span>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Số ngày (có dấu, âm = đã qua) từ HÔM NAY tới một ngày ISO cho trước. Tính bằng cách dựng lại
+// 2 mốc Date ở local time rồi lấy hiệu số mili-giây / 86400000 — không dùng "today" string so
+// sánh trực tiếp vì cần ra SỐ NGÀY cụ thể để hiển thị đếm ngược, không chỉ biết trước/sau.
+function daysFromToday(dateISO) {
+  const today = todayISO();
+  const [y1, m1, d1] = today.split("-").map(Number);
+  const [y2, m2, d2] = dateISO.split("-").map(Number);
+  return Math.round((new Date(y2, m2 - 1, d2) - new Date(y1, m1 - 1, d1)) / 86400000);
+}
+
+// Khối "Thẻ tín dụng" ở Tổng quan — tách RIÊNG khỏi lưới KpiCard (không ép vào khuôn props đơn
+// giản của KpiCard) vì cần hiển thị nhiều hơn: kỳ đang mở + kỳ vừa chốt, cộng 1 form nhỏ để tự
+// sửa hạn mức / ngày chốt sao kê / số ngày ân hạn ngay tại đây (không có "thanh toán thẻ" nào
+// trong app — chỉ hiển thị thông tin để tự nhớ trả tiền thật cho ngân hàng, đúng hạn).
+function CreditCardOverviewCard({ transactions, settings, onSave, hideAmounts, mobile }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ limit: "", closingDay: "16", graceDays: "25" });
+
+  const startEdit = () => {
+    setDraft({
+      limit: settings.limit == null ? "" : String(settings.limit),
+      closingDay: String(settings.closingDay),
+      graceDays: String(settings.graceDays),
+    });
+    setEditing(true);
+  };
+  const save = () => {
+    const closingDay = Math.min(31, Math.max(1, Number(draft.closingDay) || 16));
+    const graceDays = Math.max(0, Number(draft.graceDays) || 0);
+    const limit = draft.limit === "" ? null : Math.max(0, Number(draft.limit) || 0);
+    onSave({ limit, closingDay, graceDays });
+    setEditing(false);
+  };
+
+  const status = useMemo(() => getCreditCardStatus(transactions, settings, todayISO()), [transactions, settings]);
+  if (!status) return null;
+  const { current, lastClosed } = status;
+  const closeDays = daysFromToday(current.closingDate);
+  const dueDays = daysFromToday(lastClosed.dueDate);
+  const fieldStyle = { borderColor: T.border, color: T.ink, background: T.card };
+
+  return (
+    <div className="rounded-2xl bg-white p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <CreditCard size={15} style={{ color: T.sage }} />
+          <h3 className="text-sm font-medium" style={{ color: T.ink }}>Thẻ tín dụng</h3>
+        </div>
+        <button onClick={() => (editing ? setEditing(false) : startEdit())} className="p-1.5 rounded-md" style={{ color: T.muted }} title="Sửa hạn mức / ngày chốt / số ngày ân hạn">
+          <Pencil size={13} />
+        </button>
+      </div>
+
+      {editing ? (
+        <div className="space-y-3">
+          <div className={`grid gap-3 ${mobile ? "grid-cols-1" : "grid-cols-3"}`}>
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: T.muted }}>Hạn mức (để trống = không giới hạn)</label>
+              <input type="number" inputMode="numeric" min={0} value={draft.limit}
+                onChange={(e) => setDraft((d) => ({ ...d, limit: e.target.value }))}
+                placeholder="VD: 20000000" className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none" style={fieldStyle} />
+            </div>
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: T.muted }}>Ngày chốt sao kê (1-31)</label>
+              <input type="number" inputMode="numeric" min={1} max={31} value={draft.closingDay}
+                onChange={(e) => setDraft((d) => ({ ...d, closingDay: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none" style={fieldStyle} />
+            </div>
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: T.muted }}>Số ngày ân hạn</label>
+              <input type="number" inputMode="numeric" min={0} value={draft.graceDays}
+                onChange={(e) => setDraft((d) => ({ ...d, graceDays: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none" style={fieldStyle} />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={save} className="rounded-lg text-white text-sm font-medium py-2 px-4 flex items-center gap-1.5" style={{ background: T.ink }}>
+              <Check size={14} /> Lưu
+            </button>
+            <button onClick={() => setEditing(false)} className="rounded-lg border px-3 text-sm" style={{ borderColor: T.border, color: T.muted }}>Hủy</button>
+          </div>
+        </div>
+      ) : (
+        <div className={`grid gap-4 ${mobile ? "grid-cols-1" : "grid-cols-2"}`}>
+          <div>
+            <p className="text-[11px] mb-1" style={{ color: T.muted }}>Kỳ hiện tại (từ {formatDateVN(current.start)})</p>
+            <p className="text-xl font-medium ff-mono" style={{ color: T.ink }}>{mfmt(current.used, hideAmounts)}</p>
+            <p className="text-[11px] mt-0.5" style={{ color: T.muted }}>
+              đã dùng{current.limit != null ? ` / ${mfmt(current.limit, hideAmounts)} hạn mức` : " (chưa đặt hạn mức)"}
+            </p>
+            {current.limit != null && (
+              <p className="text-[11px]" style={{ color: current.available < 0 ? T.rust : T.sage }}>
+                Còn khả dụng: {mfmt(current.available, hideAmounts)}
+              </p>
+            )}
+            <p className="text-[11px] mt-1.5" style={{ color: T.muted }}>
+              Chốt sao kê: {formatDateVN(current.closingDate)} ({closeDays <= 0 ? "hôm nay" : `còn ${closeDays} ngày`})
+            </p>
+          </div>
+          <div>
+            <p className="text-[11px] mb-1" style={{ color: T.muted }}>Kỳ vừa chốt ({formatDateVN(lastClosed.start)} → {formatDateVN(lastClosed.end)})</p>
+            {lastClosed.amount > 0 ? (
+              <>
+                <p className="text-xl font-medium ff-mono" style={{ color: T.ink }}>{mfmt(lastClosed.amount, hideAmounts)}</p>
+                <p className="text-[11px] mt-0.5" style={{ color: lastClosed.overdue ? T.rust : T.muted }}>
+                  Hạn thanh toán: {formatDateVN(lastClosed.dueDate)}
+                </p>
+                <p className="text-[11px] mt-1.5 font-medium" style={{ color: lastClosed.overdue ? T.rust : T.sage }}>
+                  {lastClosed.overdue ? `Quá hạn ${Math.abs(dueDays)} ngày` : dueDays === 0 ? "Hạn thanh toán hôm nay" : `Còn ${dueDays} ngày để thanh toán`}
+                </p>
+              </>
+            ) : (
+              <p className="text-sm" style={{ color: T.muted }}>Không có dư nợ kỳ trước.</p>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -786,7 +976,7 @@ function WeekdaySpendingCard({ transactions, categories, month, hideAmounts, vie
 }
 
 // ---------- Tab 1: Overview ----------
-function OverviewTab({ transactions, month, budgets, categories, hideAmounts, viewMode = "web", walletBalances, isActive = true, cumulativeUnallocated, carryOverBalance = 0 }) {
+function OverviewTab({ transactions, month, budgets, categories, hideAmounts, viewMode = "web", walletBalances, isActive = true, cumulativeUnallocated, carryOverBalance = 0, creditCardSettings, onUpsertCreditCardSettings }) {
   const mobile = viewMode === "app";
   // Kích thước chữ / góc nghiêng trục biểu đồ co giãn theo giao diện đang xem: ở "app"
   // (màn hình hẹp) chữ cần nhỏ hơn và nhãn trục X cần nghiêng nhiều hơn để không bị chật/đè chữ.
@@ -999,6 +1189,16 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
           </>
         )}
       </div>
+
+      {creditCardSettings && (
+        <CreditCardOverviewCard
+          transactions={transactions}
+          settings={creditCardSettings}
+          onSave={onUpsertCreditCardSettings}
+          hideAmounts={hideAmounts}
+          mobile={mobile}
+        />
+      )}
 
       <div className="rounded-2xl bg-white p-4">
         <h3 className="text-sm font-medium mb-2" style={{ color: T.ink }}>Thu / chi theo ngày</h3>
@@ -2276,6 +2476,7 @@ function EntryTab({
   onAddTransaction, onUpdateTransaction, onDeleteTransaction, onAddIncomeCategory, onAddSubcategory,
   onDeleteCategory, onDeleteSubcategory,
   walletBalances, walletTransfers, onAddWalletTransfer, onDeleteWalletTransfer,
+  creditCardSettings,
 }) {
   const mobile = viewMode === "app";
   const emptyForm = { type: "expense", category: "", subcategory: "", amount: "", date: todayISO(), paymentMethod: "bank" };
@@ -2381,7 +2582,7 @@ function EntryTab({
       t.category,
       t.subcategory || "",
       t.amount,
-      t.paymentMethod === "cash" ? "Tiền mặt" : "Chuyển khoản",
+      t.paymentMethod === "cash" ? "Tiền mặt" : t.paymentMethod === "credit" ? "Thẻ tín dụng" : "Chuyển khoản",
     ]);
     downloadCsv(`nhat-ky-thu-chi_${month}.csv`, header, rows);
   };
@@ -2411,7 +2612,7 @@ function EntryTab({
   };
   const startEdit = (t) => {
     setEditingId(t.id);
-    setForm({ type: t.type, category: t.category, subcategory: t.subcategory, amount: String(t.amount), date: t.date, paymentMethod: t.paymentMethod === "cash" ? "cash" : "bank" });
+    setForm({ type: t.type, category: t.category, subcategory: t.subcategory, amount: String(t.amount), date: t.date, paymentMethod: t.paymentMethod });
     setAddingNewCategory(false); setNewCategoryName("");
     setAddingNewSub(false); setNewSubName("");
     scrollToEntryForm();
@@ -2467,8 +2668,8 @@ function EntryTab({
     e.preventDefault();
     if (!form.category || !form.amount || !form.date) return;
     if (form.date > todayISO()) return;
-    if (insufficientWallet) return;
-    const record = { type: form.type, date: form.date, category: form.category, subcategory: form.subcategory, amount: Number(form.amount), paymentMethod: form.paymentMethod === "cash" ? "cash" : "bank" };
+    if (insufficientWallet || insufficientCredit) return;
+    const record = { type: form.type, date: form.date, category: form.category, subcategory: form.subcategory, amount: Number(form.amount), paymentMethod: form.paymentMethod };
     if (editingId) await onUpdateTransaction(editingId, record);
     else await onAddTransaction(record);
     resetForm();
@@ -2476,19 +2677,32 @@ function EntryTab({
   // Khi ghi một khoản CHI, không được phép vượt quá số dư hiện có của đúng ví (tiền mặt / tài
   // khoản) đang chọn — tránh để ví bị âm. Nếu đang SỬA một khoản chi cũ dùng CÙNG ví, cộng lại
   // đúng số tiền cũ vào "số dư khả dụng" trước khi so sánh, vì số tiền cũ đó đã bị trừ vào ví rồi.
+  // (Thẻ tín dụng KHÔNG nằm trong walletBalances — xem khối riêng insufficientCredit bên dưới.)
   const originalTx = editingId ? transactions.find((t) => t.id === editingId) : null;
   const walletKey = form.paymentMethod === "cash" ? "cash" : "bank";
   const availableInWallet = useMemo(() => {
     if (!walletBalances) return Infinity;
     let base = walletBalances[walletKey];
-    if (originalTx && originalTx.type === "expense" && (originalTx.paymentMethod === "cash" ? "cash" : "bank") === walletKey) {
+    if (originalTx && originalTx.type === "expense" && originalTx.paymentMethod === walletKey) {
       base += originalTx.amount;
     }
     return base;
   }, [walletBalances, walletKey, originalTx]);
-  const insufficientWallet = form.type === "expense" && !!walletBalances && Number(form.amount) > availableInWallet;
+  const insufficientWallet = form.type === "expense" && form.paymentMethod !== "credit" && !!walletBalances && Number(form.amount) > availableInWallet;
+  // Hạn mức thẻ tín dụng: KHÔNG cộng dồn vĩnh viễn — chỉ tính trong đúng KỲ SAO KÊ chứa ngày
+  // `form.date` (để backdate vẫn đúng), cộng dồn các khoản chi bằng thẻ ĐÃ CÓ trong cùng kỳ đó
+  // (trừ chính giao dịch đang sửa, nếu có) rồi so với hạn mức — bỏ qua nếu chưa đặt hạn mức.
+  const creditUsedInCycle = useMemo(() => {
+    if (form.paymentMethod !== "credit" || !form.date) return 0;
+    const cycle = creditCycleForDate(form.date, creditCardSettings.closingDay);
+    return transactions
+      .filter((t) => t.id !== editingId && t.paymentMethod === "credit" && t.type === "expense" && t.date >= cycle.cycleStart && t.date <= cycle.closingDate)
+      .reduce((s, t) => s + t.amount, 0);
+  }, [transactions, form.paymentMethod, form.date, creditCardSettings.closingDay, editingId]);
+  const creditAvailable = creditCardSettings.limit != null ? creditCardSettings.limit - creditUsedInCycle : Infinity;
+  const insufficientCredit = form.type === "expense" && form.paymentMethod === "credit" && creditCardSettings.limit != null && Number(form.amount) > creditAvailable;
   // Chỉ hợp lệ khi có đủ danh mục, số tiền, và ngày — phần chi tiết (subcategory) không bắt buộc.
-  const canSubmit = !!form.category && !!form.amount && Number(form.amount) > 0 && !!form.date && form.date <= todayISO() && !insufficientWallet;
+  const canSubmit = !!form.category && !!form.amount && Number(form.amount) > 0 && !!form.date && form.date <= todayISO() && !insufficientWallet && !insufficientCredit;
 
   const inputStyle = { borderColor: T.border, color: T.ink, background: T.card };
   const formatAmount = (raw) => (raw ? Number(raw).toLocaleString("vi-VN") : "");
@@ -2505,7 +2719,7 @@ function EntryTab({
 
         <div className="flex rounded-lg overflow-hidden text-sm" style={{ border: `1px solid ${T.border}` }}>
           {["expense", "income"].map((t) => (
-            <button type="button" key={t} onClick={() => { setForm((f) => ({ ...f, type: t, category: "", subcategory: "" })); setAddingNewCategory(false); setAddingNewSub(false); }}
+            <button type="button" key={t} onClick={() => { setForm((f) => ({ ...f, type: t, category: "", subcategory: "", paymentMethod: t === "income" && f.paymentMethod === "credit" ? "bank" : f.paymentMethod })); setAddingNewCategory(false); setAddingNewSub(false); }}
               className="flex-1 py-2 font-medium transition-colors"
               style={form.type === t ? { background: t === "income" ? T.green : T.rust, color: "#fff" } : { background: "#fff", color: T.muted }}>
               {t === "income" ? "Thu nhập" : "Chi tiêu"}
@@ -2519,6 +2733,9 @@ function EntryTab({
             {[
               { key: "bank", label: "Chuyển khoản", icon: Landmark },
               { key: "cash", label: "Tiền mặt", icon: Banknote },
+              // Thẻ tín dụng chỉ có nghĩa khi CHI tiêu — quẹt thẻ để "nhận thu nhập" là vô lý,
+              // nên ẩn hẳn lựa chọn này khi đang ghi khoản thu (xem auto-reset ở nút Thu/Chi).
+              ...(form.type === "expense" ? [{ key: "credit", label: "Thẻ tín dụng", icon: CreditCard }] : []),
             ].map((opt) => {
               const Icon = opt.icon;
               const active = form.paymentMethod === opt.key;
@@ -2596,6 +2813,11 @@ function EntryTab({
           {insufficientWallet && (
             <p className="text-[11px] mt-1.5" style={{ color: T.rust }}>
               {walletKey === "cash" ? "Ví tiền mặt" : "Tài khoản ngân hàng"} không đủ số dư — hiện chỉ còn {mfmt(availableInWallet, hideAmounts)}.
+            </p>
+          )}
+          {insufficientCredit && (
+            <p className="text-[11px] mt-1.5" style={{ color: T.rust }}>
+              Vượt hạn mức khả dụng của thẻ tín dụng trong kỳ sao kê này — hiện chỉ còn {mfmt(creditAvailable, hideAmounts)}.
             </p>
           )}
         </div>
@@ -2800,14 +3022,18 @@ function EntryTab({
 
 // ---------- Ví tiền: badge hình thức thanh toán + panel chuyển đổi tiền mặt <-> ngân hàng ----------
 function PaymentMethodBadge({ method }) {
-  const isCash = method === "cash";
-  const Icon = isCash ? Banknote : Landmark;
+  const cfg = {
+    cash: { Icon: Banknote, label: "Tiền mặt", bg: T.oliveSoft, fg: T.olive },
+    credit: { Icon: CreditCard, label: "Thẻ tín dụng", bg: T.sageSoft, fg: T.sage },
+    bank: { Icon: Landmark, label: "Chuyển khoản", bg: T.greenSoft, fg: T.green },
+  };
+  const { Icon, label, bg, fg } = cfg[method] || cfg.bank;
   return (
     <span
       className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2 py-1 rounded-full shrink-0"
-      style={{ background: isCash ? T.oliveSoft : T.greenSoft, color: isCash ? T.olive : T.green }}
+      style={{ background: bg, color: fg }}
     >
-      <Icon size={11} /> {isCash ? "Tiền mặt" : "Chuyển khoản"}
+      <Icon size={11} /> {label}
     </span>
   );
 }
@@ -3576,6 +3802,10 @@ export default function App() {
   const [budgets, setBudgets] = useState({});
   const [walletTransfers, setWalletTransfers] = useState([]);
   const [budgetTransfers, setBudgetTransfers] = useState([]);
+  // Cài đặt thẻ tín dụng — luôn có giá trị mặc định hợp lý (chốt ngày 16, ân hạn 25 ngày, hạn
+  // mức để trống = chưa giới hạn) ngay cả khi người dùng chưa lưu gì vào Supabase lần nào, để
+  // thẻ "Thẻ tín dụng" ở Tổng quan không bao giờ hiện trống trơn.
+  const [creditCardSettings, setCreditCardSettings] = useState({ limit: null, closingDay: 16, graceDays: 25 });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [tab, setTab] = useState("overview");
@@ -3681,6 +3911,20 @@ export default function App() {
     setWalletTransfers((transferRes.data || []).map(mapWalletTransferRow));
     setBudgetTransfers((budgetTransferRes.data || []).map(mapBudgetTransferRow));
     setLoading(false);
+
+    // Cài đặt thẻ tín dụng: tải RIÊNG, KHÔNG gộp vào khối Promise.all/err ở trên — vì bảng
+    // fin_credit_card_settings là bảng MỚI, người dùng cần tự chạy SQL tạo bảng này trước khi
+    // dùng được tính năng thẻ tín dụng. Nếu gộp chung, lúc bảng chưa tồn tại (lỗi "relation does
+    // not exist") sẽ làm SẬP toàn bộ màn hình chỉ vì tính năng phụ này chưa được thiết lập —
+    // thay vào đó, lỗi ở đây chỉ bị bỏ qua lặng lẽ, giữ nguyên giá trị mặc định.
+    const settingsRes = await supabase.from("fin_credit_card_settings").select("*").maybeSingle();
+    if (!settingsRes.error && settingsRes.data) {
+      setCreditCardSettings({
+        limit: settingsRes.data.credit_limit == null ? null : Number(settingsRes.data.credit_limit),
+        closingDay: settingsRes.data.closing_day,
+        graceDays: settingsRes.data.grace_days,
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -3693,17 +3937,36 @@ export default function App() {
       setTransactions([]); setCategories({ income: [], expense: [] }); setBudgets({});
       setWalletTransfers([]); setBudgetTransfers([]); setLoading(false);
       setMyProfile(null);
+      setCreditCardSettings({ limit: null, closingDay: 16, graceDays: 25 });
     }
   }, [session, fetchAll, fetchMyProfile]);
 
   /* ---------- handlers: mỗi hàm cập nhật UI ngay, rồi đồng bộ với Supabase ---------- */
+  // Chuẩn hoá paymentMethod về đúng 1 trong 3 giá trị hợp lệ — phòng khi có giá trị lạ lọt vào.
+  const normalizePM = (pm) => (pm === "cash" || pm === "credit" ? pm : "bank");
+  // Kiểm tra hạn mức thẻ tín dụng cho MỘT kỳ sao kê cụ thể (kỳ chứa `date`), có thể loại trừ
+  // 1 giao dịch theo id (dùng khi sửa, để không tự cộng trùng chính giao dịch đang sửa).
+  const creditUsedInCycleExcluding = (date, excludeId) => {
+    const cycle = creditCycleForDate(date, creditCardSettings.closingDay);
+    return transactions
+      .filter((t) => t.id !== excludeId && t.paymentMethod === "credit" && t.type === "expense" && t.date >= cycle.cycleStart && t.date <= cycle.closingDate)
+      .reduce((s, t) => s + t.amount, 0);
+  };
   const addTransaction = async (record) => {
     if (!supabase) { setLoadError("Chưa cấu hình Supabase — không thể lưu khoản ghi."); return; }
+    const pm = normalizePM(record.paymentMethod);
     if (record.type === "expense") {
-      const walletKey = record.paymentMethod === "cash" ? "cash" : "bank";
-      if (record.amount > walletBalances[walletKey]) {
-        alert(`${walletKey === "cash" ? "Ví tiền mặt" : "Tài khoản ngân hàng"} không đủ số dư để ghi khoản chi này.`);
-        return;
+      if (pm === "credit") {
+        if (creditCardSettings.limit != null && creditUsedInCycleExcluding(record.date, null) + record.amount > creditCardSettings.limit) {
+          alert("Thẻ tín dụng không đủ hạn mức khả dụng trong kỳ sao kê này để ghi khoản chi này.");
+          return;
+        }
+      } else {
+        const walletKey = pm; // "cash" hoặc "bank"
+        if (record.amount > walletBalances[walletKey]) {
+          alert(`${walletKey === "cash" ? "Ví tiền mặt" : "Tài khoản ngân hàng"} không đủ số dư để ghi khoản chi này.`);
+          return;
+        }
       }
     }
     const { data, error } = await supabase
@@ -3714,23 +3977,31 @@ export default function App() {
         category: record.category,
         subcategory: record.subcategory || null,
         amount: record.amount,
-        payment_method: record.paymentMethod === "cash" ? "cash" : "bank",
+        payment_method: pm,
       })
       .select().single();
     if (error) { setLoadError(error.message); return; }
     setTransactions((prev) => [mapTransactionRow(data), ...prev]);
   };
   const updateTransaction = async (id, record) => {
+    const pm = normalizePM(record.paymentMethod);
+    const original = transactions.find((t) => t.id === id);
     if (record.type === "expense") {
-      const walletKey = record.paymentMethod === "cash" ? "cash" : "bank";
-      const original = transactions.find((t) => t.id === id);
-      let available = walletBalances[walletKey];
-      if (original && original.type === "expense" && (original.paymentMethod === "cash" ? "cash" : "bank") === walletKey) {
-        available += original.amount;
-      }
-      if (record.amount > available) {
-        alert(`${walletKey === "cash" ? "Ví tiền mặt" : "Tài khoản ngân hàng"} không đủ số dư để lưu thay đổi này.`);
-        return;
+      if (pm === "credit") {
+        if (creditCardSettings.limit != null && creditUsedInCycleExcluding(record.date, id) + record.amount > creditCardSettings.limit) {
+          alert("Thẻ tín dụng không đủ hạn mức khả dụng trong kỳ sao kê này để lưu thay đổi này.");
+          return;
+        }
+      } else {
+        const walletKey = pm; // "cash" hoặc "bank"
+        let available = walletBalances[walletKey];
+        if (original && original.type === "expense" && original.paymentMethod === walletKey) {
+          available += original.amount;
+        }
+        if (record.amount > available) {
+          alert(`${walletKey === "cash" ? "Ví tiền mặt" : "Tài khoản ngân hàng"} không đủ số dư để lưu thay đổi này.`);
+          return;
+        }
       }
     }
     setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...record } : t)));
@@ -3743,7 +4014,7 @@ export default function App() {
         category: record.category,
         subcategory: record.subcategory || null,
         amount: record.amount,
-        payment_method: record.paymentMethod === "cash" ? "cash" : "bank",
+        payment_method: pm,
       })
       .eq("id", id);
     if (error) setLoadError(error.message);
@@ -3827,6 +4098,16 @@ export default function App() {
     if (error) setLoadError(error.message);
   };
 
+  // Cập nhật cài đặt thẻ tín dụng (hạn mức / ngày chốt sao kê / số ngày ân hạn) — đúng 1
+  // dòng/người dùng, nên chỉ cần upsert theo khoá "user_id" (xem bảng fin_credit_card_settings).
+  const upsertCreditCardSettings = async ({ limit, closingDay, graceDays }) => {
+    setCreditCardSettings({ limit, closingDay, graceDays });
+    if (!supabase) return;
+    const { error } = await supabase
+      .from("fin_credit_card_settings")
+      .upsert({ credit_limit: limit, closing_day: closingDay, grace_days: graceDays }, { onConflict: "user_id" });
+    if (error) setLoadError(error.message);
+  };
   const upsertBudget = async (budgetMonth, category, amount) => {
     setBudgets((prev) => {
       const cur = prev[budgetMonth] || { total: null, categories: {} };
@@ -3898,19 +4179,24 @@ export default function App() {
   // cách một cuốn sổ quỹ thật hoạt động. Tổng 2 số này luôn khớp đúng bằng tổng số dư
   // (tổng thu - tổng chi) tính từ trước đến nay — các lượt "chuyển đổi" chỉ tái phân bổ
   // giữa 2 ví, không làm thay đổi tổng số dư.
+  // LƯU Ý: giao dịch "paymentMethod === credit" (thẻ tín dụng) KHÔNG được tính vào đây — quẹt
+  // thẻ tín dụng không rút tiền thật ra khỏi tiền mặt/tài khoản ngay lúc đó (không có cơ chế
+  // "thanh toán thẻ" trong app này, người dùng tự trả tiền thật cho ngân hàng ở NGOÀI app), nên
+  // phải cộng dồn cash/bank TƯỜNG MINH theo đúng paymentMethod của từng giao dịch (không còn
+  // dùng mẹo "bank = total - cash" như trước, vì "total" giờ sẽ lẫn cả chi tiêu bằng thẻ).
   const walletBalances = useMemo(() => {
     let cash = 0;
-    let total = 0;
+    let bank = 0;
     transactions.forEach((t) => {
+      if (t.paymentMethod === "credit") return; // thẻ tín dụng: xem getCreditCardStatus riêng
       const signed = t.type === "income" ? t.amount : -t.amount;
-      total += signed;
-      if (t.paymentMethod === "cash") cash += signed;
+      if (t.paymentMethod === "cash") cash += signed; else bank += signed;
     });
     walletTransfers.forEach((w) => {
-      if (w.direction === "cash_to_bank") cash -= w.amount;
-      else cash += w.amount;
+      if (w.direction === "cash_to_bank") { cash -= w.amount; bank += w.amount; }
+      else { cash += w.amount; bank -= w.amount; }
     });
-    return { cash, bank: total - cash, total };
+    return { cash, bank, total: cash + bank };
   }, [transactions, walletTransfers]);
 
   // "Chưa phân bổ" LŨY KẾ (kiểu YNAB) tính tới hết tháng đang xem — dùng chung cho cả 3 tab
@@ -3966,7 +4252,7 @@ export default function App() {
           ở tab "Tổng quan" bị khởi tạo lại từ đầu mỗi lần quay lại tab đó, có lúc lỡ nhịp đo và
           hiện bảng xếp hạng dài tràn lan cho tới khi tải lại cả trang mới hết. */}
       <div style={{ display: tab === "overview" ? "block" : "none" }}>
-        <OverviewTab transactions={transactions} month={month} budgets={budgets} categories={categories} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} isActive={tab === "overview"} cumulativeUnallocated={cumulativeUnallocated} carryOverBalance={carryOverBalance} />
+        <OverviewTab transactions={transactions} month={month} budgets={budgets} categories={categories} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} isActive={tab === "overview"} cumulativeUnallocated={cumulativeUnallocated} carryOverBalance={carryOverBalance} creditCardSettings={creditCardSettings} onUpsertCreditCardSettings={upsertCreditCardSettings} />
       </div>
       <div style={{ display: tab === "flow" ? "block" : "none" }}>
         <CashFlowTab transactions={transactions} month={month} budgets={budgets} viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts} cumulativeUnallocated={cumulativeUnallocated} carryOverBalance={carryOverBalance} />
@@ -3992,6 +4278,7 @@ export default function App() {
           onDeleteCategory={deleteCategory} onDeleteSubcategory={deleteSubcategory}
           walletBalances={walletBalances} walletTransfers={walletTransfers}
           onAddWalletTransfer={addWalletTransfer} onDeleteWalletTransfer={deleteWalletTransfer}
+          creditCardSettings={creditCardSettings}
         />
       </div>
       {isAdmin && (
