@@ -2729,7 +2729,7 @@ function EntryTab({
 
         <div>
           <label className="text-xs mb-1 block" style={{ color: T.muted }}>Hình thức</label>
-          <div className="flex rounded-lg overflow-hidden text-sm" style={{ border: `1px solid ${T.border}` }}>
+          <div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${T.border}` }}>
             {[
               { key: "bank", label: "Chuyển khoản", icon: Landmark },
               { key: "cash", label: "Tiền mặt", icon: Banknote },
@@ -2741,9 +2741,9 @@ function EntryTab({
               const active = form.paymentMethod === opt.key;
               return (
                 <button type="button" key={opt.key} onClick={() => setForm((f) => ({ ...f, paymentMethod: opt.key }))}
-                  className="flex-1 py-2 font-medium transition-colors flex items-center justify-center gap-1.5"
+                  className="flex-1 py-1.5 text-[11px] font-semibold transition-colors flex items-center justify-center gap-1 whitespace-nowrap"
                   style={active ? { background: T.ink, color: "#fff" } : { background: "#fff", color: T.muted }}>
-                  <Icon size={13} /> {opt.label}
+                  <Icon size={12} className="shrink-0" /> {opt.label}
                 </button>
               );
             })}
