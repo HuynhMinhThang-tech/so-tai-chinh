@@ -12,32 +12,36 @@ import {
   Users, ShieldCheck, ShieldOff, MailCheck,
 } from "lucide-react";
 
-// ---------- Theme: DÙNG CHUNG bảng màu & font với app "Việc Của Tôi" ----------
-// (Cùng hex, cùng font Fraunces/Inter/IBM Plex Mono — để 2 app trông như một bộ sản phẩm)
+// ---------- Theme: DÙNG CHUNG bảng màu & font với app "Nhật Ký Giao Dịch" (kiểu Claude) ----------
+// (Cùng hex, cùng font Plus Jakarta Sans/JetBrains Mono, cùng thẻ phẳng viền mảnh — để các app
+// trong cùng bộ sản phẩm trông đồng nhất. Tên key object giữ nguyên để không phải sửa hàng trăm
+// chỗ tham chiếu T.xxx trong file, chỉ đổi Ý NGHĨA/giá trị của vài key cho khớp vai trò mới:
+// "sage" từ "hạn mức ngân sách" chuyển thành accent thương hiệu dùng chung (nav đang chọn, link,
+// thẻ tín dụng); "olive" vẫn là "trung tính/cảnh báo" nhưng đổi sắc cho khớp tông ấm mới.)
 const T = {
-  page: "#EDEFE7",
+  page: "#FAF9F5",
   card: "#FFFFFF",
-  ink: "#20261F",
-  muted: "#646B5D",
-  border: "#D9DCCE",
-  green: "#2F6F5E",     // thu nhập / tích cực (= "teal" của app Việc Của Tôi)
-  greenSoft: "#E1EDE8",
-  sage: "#3E6B45",       // hạn mức ngân sách (= "done" của app Việc Của Tôi)
-  sageSoft: "#E1EAE0",
-  olive: "#B8792C",      // cảnh báo / trung tính (= "amber")
-  oliveSoft: "#F3E7D2",
-  rust: "#AD3B34",       // chi tiêu / vượt hạn mức (= "danger")
-  rustSoft: "#F5E1DF",
+  ink: "#1C1B18",
+  muted: "#6B6963",
+  border: "#E7E5E0",
+  green: "#15803D",     // thu nhập / số dương (= --pnl-win của app Nhật Ký Giao Dịch)
+  greenSoft: "#E7F3EC",
+  sage: "#C96442",       // accent thương hiệu dùng chung (= --accent của app Nhật Ký Giao Dịch)
+  sageSoft: "#F6E7E1",
+  olive: "#B45309",      // tiền mặt / cảnh báo trung tính (sắc hổ phách ấm)
+  oliveSoft: "#FBF0DE",
+  rust: "#B91C1C",       // chi tiêu / vượt hạn mức / số âm (= --pnl-loss của app Nhật Ký Giao Dịch)
+  rustSoft: "#FBEAEA",
 };
-const CHART_COLORS = ["#2F6F5E", "#B8792C", "#AD3B34", "#3E6B45", "#6E8F63", "#C4A24A", "#4F6B57"];
+const CHART_COLORS = ["#15803D", "#B45309", "#B91C1C", "#C96442", "#4D7C5F", "#C9A227", "#8A5A44"];
 
 const FontImport = () => (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
-    .ff-serif { font-family: 'Fraunces', Georgia, serif; }
-    .ff-sans { font-family: 'Inter', system-ui, sans-serif; }
-    .ff-mono { font-family: 'IBM Plex Mono', monospace; }
-    .rounded-2xl.bg-white { box-shadow: 0 1px 2px rgba(32,38,31,0.06); border-radius: 10px !important; }
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+    .ff-serif { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .ff-sans { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .ff-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .rounded-2xl.bg-white { border: 1px solid ${T.border}; box-shadow: none; border-radius: 12px !important; }
     .rounded-xl { border-radius: 8px !important; }
     /* ---- PWA trên iPhone: khi mở từ màn hình chính (standalone), chặn hiệu ứng
        cuộn nẩy (rubber-banding) làm lộ khoảng trắng phía sau, và chặn zoom 2 ngón tay ngoài ý muốn ---- */
@@ -922,13 +926,13 @@ function WeekdaySpendingCard({ transactions, categories, month, hideAmounts, vie
 
       {level > 0 && (
         <div className="flex items-center gap-1.5 text-xs mb-3 flex-wrap">
-          <button type="button" onClick={resetDrill} className="font-medium" style={{ color: T.green }}>Tất cả</button>
+          <button type="button" onClick={resetDrill} className="font-medium" style={{ color: T.sage }}>Tất cả</button>
           <ChevronRight size={12} style={{ color: T.muted }} />
           <button
             type="button"
             onClick={() => setDrillCategory(null)}
             className="font-medium"
-            style={{ color: level === 1 ? T.ink : T.green }}
+            style={{ color: level === 1 ? T.ink : T.sage }}
           >
             {VN_WEEKDAY_LABELS[drillDay]}
           </button>
@@ -1347,7 +1351,7 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
                   )
                 }
                 className="text-xs font-medium shrink-0"
-                style={{ color: T.green }}
+                style={{ color: T.sage }}
               >
                 {expandedRankCats.size === byCategoryDrill.length ? "Thu gọn tất cả" : "Mở rộng tất cả"}
               </button>
@@ -1853,7 +1857,7 @@ function TransferBudgetModal({ open, fromName, maxAmount, targetOptions, hideAmo
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold mb-1 ff-serif flex items-center gap-1.5" style={{ color: T.ink, fontSize: 16 }}>
-          <ArrowLeftRight size={15} style={{ color: T.green }} /> Chuyển ngân sách
+          <ArrowLeftRight size={15} style={{ color: T.sage }} /> Chuyển ngân sách
         </h3>
         <p className="text-xs mb-4 leading-relaxed" style={{ color: T.muted }}>
           Từ <span className="font-medium" style={{ color: T.ink }}>{fromName}</span> — khả dụng để chuyển:{" "}
@@ -1940,7 +1944,7 @@ function TopUpBudgetModal({ open, categoryName, currentBudget, maxAmount, hideAm
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold mb-1 ff-serif flex items-center gap-1.5" style={{ color: T.ink, fontSize: 16 }}>
-          <PlusCircle size={15} style={{ color: T.green }} /> Thêm từ chưa phân bổ
+          <PlusCircle size={15} style={{ color: T.sage }} /> Thêm từ chưa phân bổ
         </h3>
         <p className="text-xs mb-4 leading-relaxed" style={{ color: T.muted }}>
           Vào <span className="font-medium" style={{ color: T.ink }}>{categoryName}</span> (hiện {mfmt(currentBudget, hideAmounts)}) — chưa phân bổ khả dụng:{" "}
@@ -2460,7 +2464,7 @@ function SelectWithDelete({ value, onChange, options, placeholder, disabled, onD
               type="button"
               onClick={() => { onAddNew(); setOpen(false); }}
               className="w-full text-left px-3 py-2 text-sm font-medium"
-              style={{ color: T.green, borderTop: `1px solid ${T.border}` }}
+              style={{ color: T.sage, borderTop: `1px solid ${T.border}` }}
             >
               {addNewLabel || "+ Thêm danh mục mới"}
             </button>
@@ -3385,7 +3389,7 @@ function AuthScreen({ initialMode = "login" }) {
 
           {mode === "login" && (
             <div className="text-right">
-              <button type="button" onClick={() => { resetMessages(); setMode("forgot"); }} className="text-xs font-medium" style={{ color: T.green }}>
+              <button type="button" onClick={() => { resetMessages(); setMode("forgot"); }} className="text-xs font-medium" style={{ color: T.sage }}>
                 Quên mật khẩu?
               </button>
             </div>
@@ -3404,11 +3408,11 @@ function AuthScreen({ initialMode = "login" }) {
           <p className="text-xs text-center mt-4" style={{ color: T.muted }}>
             {mode === "login" ? (
               <>Chưa có tài khoản?{" "}
-                <button onClick={() => { resetMessages(); setMode("register"); }} className="font-semibold" style={{ color: T.green }}>Đăng ký</button>
+                <button onClick={() => { resetMessages(); setMode("register"); }} className="font-semibold" style={{ color: T.sage }}>Đăng ký</button>
               </>
             ) : (
               <>Đã có tài khoản?{" "}
-                <button onClick={() => { resetMessages(); setMode("login"); }} className="font-semibold" style={{ color: T.green }}>Đăng nhập</button>
+                <button onClick={() => { resetMessages(); setMode("login"); }} className="font-semibold" style={{ color: T.sage }}>Đăng nhập</button>
               </>
             )}
           </p>
@@ -3444,7 +3448,7 @@ function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMod
                 boxShadow: active ? "0 1px 2px rgba(32,38,31,0.08)" : "none",
               }}
             >
-              <Icon size={16} strokeWidth={2.3} style={{ color: active ? T.green : T.muted }} />
+              <Icon size={16} strokeWidth={2.3} style={{ color: active ? T.sage : T.muted }} />
               {t.label}
             </button>
           );
@@ -3584,7 +3588,7 @@ function UsersTab({ currentUserId, viewMode = "web" }) {
 
       {!loading && !loadErr && rows.length > 0 && (
         <div className={`grid gap-3 items-stretch ${mobile ? "grid-cols-2" : "grid-cols-4"}`}>
-          <UserStatCard icon={Users} label="Tổng tài khoản" value={rows.length} accent={T.green} />
+          <UserStatCard icon={Users} label="Tổng tài khoản" value={rows.length} accent={T.sage} />
           <UserStatCard icon={MailCheck} label="Đã xác nhận email" value={confirmedCount} accent={T.sage} />
           <UserStatCard icon={Mail} label="Chờ xác nhận" value={pendingCount} accent={pendingCount > 0 ? T.olive : T.muted} />
           <UserStatCard icon={ShieldCheck} label="Quản trị viên" value={adminCount} accent={T.rust} />
@@ -3594,7 +3598,7 @@ function UsersTab({ currentUserId, viewMode = "web" }) {
       <div className="rounded-2xl bg-white p-4">
         <div className={mobile ? "space-y-2.5 mb-3" : "flex items-center justify-between gap-2 mb-3"}>
           <h3 className="text-sm font-medium flex items-center gap-1.5 shrink-0" style={{ color: T.ink }}>
-            <Users size={15} style={{ color: T.green }} /> Danh sách người dùng
+            <Users size={15} style={{ color: T.sage }} /> Danh sách người dùng
           </h3>
           <div className={mobile ? "space-y-2" : "flex items-center gap-2"}>
             <div className="relative">
@@ -4338,7 +4342,7 @@ export default function App() {
               style={{
                 flex: 1, border: "none", background: "transparent", cursor: "pointer",
                 display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "6px 0",
-                color: active ? T.green : T.muted,
+                color: active ? T.sage : T.muted,
               }}
             >
               <Icon size={18} strokeWidth={2.3} />
