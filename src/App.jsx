@@ -38,6 +38,16 @@ const T = {
   oliveSoft: "var(--stc-olive-soft)",
   rust: "var(--stc-rust)",       // chi tiêu / vượt hạn mức / số âm (= --pnl-loss của app Nhật Ký Giao Dịch)
   rustSoft: "var(--stc-rust-soft)",
+  // ---- "Solid" — CỐ Ý KHÔNG đổi theo theme (không định nghĩa lại trong :root.dark bên dưới) ----
+  // Dùng riêng cho nền nút/pill ĐẶC (nút gửi form, toggle đang chọn, nhãn trên khối NodeBox...) có
+  // chữ trắng cứng đè lên trên. Không thể dùng T.ink/T.green/T.rust thường cho việc này vì 3 màu
+  // đó ĐƯỢC THIẾT KẾ để đảo/sáng lên ở chế độ tối (đúng vai trò làm màu CHỮ/icon/biểu đồ), nên nếu
+  // lấy làm NỀN sẽ khiến chữ trắng gần như biến mất (nhất là T.ink: gần đen ở sáng -> gần trắng ở
+  // tối, nền sẽ cùng tông với chữ trắng đè lên). "Solid" giữ nguyên đúng sắc ở chế độ sáng cho cả
+  // 2 theme để chữ trắng luôn đủ tương phản.
+  inkSolid: "var(--stc-ink-solid)",
+  greenSolid: "var(--stc-green-solid)",
+  rustSolid: "var(--stc-rust-solid)",
 };
 // Bảng hex THẬT theo từng theme, dùng riêng cho biểu đồ recharts (xem comment ở CHART_HEX bên
 // dưới, gần OverviewTab/BudgetTab) — recharts đọc fill/stroke như SVG attribute thuần, nên KHÔNG
@@ -64,6 +74,8 @@ const FontImport = () => (
       --stc-sage:#C96442; --stc-sage-soft:#F6E7E1; --stc-olive:#B45309; --stc-olive-soft:#FBF0DE;
       --stc-rust:#B91C1C; --stc-rust-soft:#FBEAEA; --stc-evening:#3E4C6B;
       --stc-sidebar-w: 256px;
+      /* Không định nghĩa lại trong :root.dark bên dưới -> luôn giữ nguyên giá trị này ở cả 2 theme */
+      --stc-ink-solid:#1C1B18; --stc-green-solid:#15803D; --stc-rust-solid:#B91C1C;
     }
     :root.dark {
       --stc-page:#181715; --stc-card:#22211E; --stc-ink:#F2EFE9; --stc-muted:#A6A39B;
@@ -75,6 +87,10 @@ const FontImport = () => (
     .ff-serif { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     .ff-sans { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     .ff-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    /* Tailwind "bg-white" là class cố định (hex trắng thẳng, không qua T/var) — đè lại bằng
+       var(--stc-card) để mọi thẻ card (và NodeBox trong Trực quan dòng tiền) đổi đúng nền theo
+       Giao diện Sáng/Tối, tránh chữ var(--stc-ink) gần trắng bị "mất tích" trên nền trắng cứng. */
+    .bg-white { background-color: var(--stc-card) !important; }
     .rounded-2xl.bg-white { border: 1px solid ${T.border}; box-shadow: none; border-radius: 12px !important; }
     .rounded-xl { border-radius: 8px !important; }
     /* Nền giờ sáng hơn (kem ấm thay vì ô-liu đậm) nên nhích đậm chữ lên 1 chút cho dễ đọc —
@@ -595,7 +611,7 @@ function CreditCardOverviewCard({ transactions, settings, onSave, hideAmounts, m
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={save} className="rounded-lg text-white text-sm font-medium py-2 px-4 flex items-center gap-1.5" style={{ background: T.ink }}>
+            <button onClick={save} className="rounded-lg text-white text-sm font-medium py-2 px-4 flex items-center gap-1.5" style={{ background: T.inkSolid }}>
               <Check size={14} /> Lưu
             </button>
             <button onClick={() => setEditing(false)} className="rounded-lg border px-3 text-sm" style={{ borderColor: T.border, color: T.muted }}>Hủy</button>
@@ -667,7 +683,7 @@ function ViewToggle({ value, onChange, full = false }) {
             key={o.id}
             onClick={() => onChange(o.id)}
             className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${full ? "flex-1" : ""}`}
-            style={active ? { background: T.ink, color: "#fff" } : { color: T.muted }}
+            style={active ? { background: T.inkSolid, color: "#fff" } : { color: T.muted }}
           >
             <Icon size={13} /> {o.label}
           </button>
@@ -693,7 +709,7 @@ function IconViewToggle({ value, onChange }) {
             onClick={() => onChange(o.id)}
             aria-label={o.id}
             className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
-            style={active ? { background: T.ink, color: "#fff" } : { background: T.card, border: `1px solid ${T.border}`, color: T.muted }}
+            style={active ? { background: T.inkSolid, color: "#fff" } : { background: T.card, border: `1px solid ${T.border}`, color: T.muted }}
           >
             <Icon size={15} />
           </button>
@@ -709,7 +725,7 @@ function AmountVisibilityToggle({ hidden, onChange, full = false }) {
       onClick={() => onChange(!hidden)}
       aria-label={hidden ? "Hiện số tiền" : "Ẩn số tiền"}
       className={`flex items-center justify-center gap-1.5 rounded-lg text-xs font-medium transition-colors ${full ? "w-full py-1.5" : "w-8 h-8"}`}
-      style={hidden ? { background: T.ink, color: "#fff" } : { background: T.card, border: `1px solid ${T.border}`, color: T.muted }}
+      style={hidden ? { background: T.inkSolid, color: "#fff" } : { background: T.card, border: `1px solid ${T.border}`, color: T.muted }}
     >
       {hidden ? <EyeOff size={full ? 13 : 15} /> : <Eye size={full ? 13 : 15} />}
       {full && <span>{hidden ? "Đã ẩn số tiền" : "Ẩn số tiền"}</span>}
@@ -792,7 +808,7 @@ function ConfirmModal({ open, title = "Xác nhận xoá", message, confirmLabel 
             type="button"
             onClick={onConfirm}
             className="rounded-lg px-3.5 py-2 text-sm font-medium text-white"
-            style={{ background: T.rust }}
+            style={{ background: T.rustSolid }}
           >
             {confirmLabel}
           </button>
@@ -1753,7 +1769,7 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
         ) : (
           <div className="fin-tree min-w-max mx-auto" style={{ transform: "scaleY(-1)" }}>
             <ul><li>
-              <NodeBox className="min-w-[170px]" style={{ background: T.green, color: "#fff", transform: "scaleY(-1)" }}>
+              <NodeBox className="min-w-[170px]" style={{ background: T.greenSolid, color: "#fff", transform: "scaleY(-1)" }}>
                 <p className="text-xs opacity-90">Tổng thu nhập</p>
                 <p className="font-semibold">{mfmt(totalIncomeWithCarryOver, hideAmounts)}</p>
               </NodeBox>
@@ -1787,7 +1803,7 @@ function CashFlowTab({ transactions, month, budgets, viewMode = "web", hideAmoun
         ) : (
           <div className="fin-tree min-w-max mx-auto">
             <ul><li>
-              <NodeBox className="min-w-[170px]" style={{ background: T.rust, color: "#fff" }}>
+              <NodeBox className="min-w-[170px]" style={{ background: T.rustSolid, color: "#fff" }}>
                 <p className="text-xs opacity-90">Tổng dòng tiền ra</p>
                 <p className="font-semibold">{mfmt(totalIncomeWithCarryOver, hideAmounts)}</p>
               </NodeBox>
@@ -1955,7 +1971,7 @@ function TransferBudgetModal({ open, fromName, maxAmount, targetOptions, hideAmo
               disabled={!canSubmit}
               onClick={() => onConfirm({ amount: amountNum, to })}
               className="rounded-lg px-3.5 py-2 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-              style={{ background: T.green }}
+              style={{ background: T.greenSolid }}
             >
               <ArrowLeftRight size={14} /> Chuyển
             </button>
@@ -2051,7 +2067,7 @@ function TopUpBudgetModal({ open, categoryName, currentBudget, maxAmount, hideAm
               disabled={!canSubmit}
               onClick={submit}
               className="rounded-lg px-3.5 py-2 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-              style={{ background: T.green }}
+              style={{ background: T.greenSolid }}
             >
               <Plus size={14} /> Thêm
             </button>
@@ -2316,7 +2332,7 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
                   <input autoFocus value={newCatName} onChange={(e) => setNewCatName(e.target.value)}
                     placeholder="Ví dụ: Sức khỏe" className="flex-1 rounded-lg border px-3 py-2 text-sm focus:outline-none" style={inputStyle}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmNewCat(); } }} />
-                  <button type="button" onClick={confirmNewCat} className="rounded-lg px-2 text-white" style={{ background: T.green }}><Check size={16} /></button>
+                  <button type="button" onClick={confirmNewCat} className="rounded-lg px-2 text-white" style={{ background: T.greenSolid }}><Check size={16} /></button>
                   <button type="button" onClick={() => { setAddingNewCat(false); setNewCatName(""); }}
                     className="rounded-lg border px-2" style={{ borderColor: T.border, color: T.muted }}><X size={16} /></button>
                 </div>
@@ -2331,7 +2347,7 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: T.muted }}>đ</span>
               </div>
             </div>
-            <button type="submit" disabled={catAmountExceedsMax} className={`rounded-lg px-4 py-2 text-white text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed ${mobile ? "w-full" : ""}`} style={{ background: T.ink }}>
+            <button type="submit" disabled={catAmountExceedsMax} className={`rounded-lg px-4 py-2 text-white text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed ${mobile ? "w-full" : ""}`} style={{ background: T.inkSolid }}>
               {editingCat ? <Check size={14} /> : <Plus size={14} />} {editingCat ? "Lưu" : "Thêm"}
             </button>
             {editingCat && (
@@ -2372,7 +2388,7 @@ function BudgetTab({ budgets, month, categories, transactions, hideAmounts, view
                   </p>
                   <div className="flex items-center gap-1 shrink-0">
                     {over && (
-                      <span className="text-[10px] font-semibold px-2 py-1 rounded-full whitespace-nowrap" style={{ background: T.rust, color: "#fff" }}>
+                      <span className="text-[10px] font-semibold px-2 py-1 rounded-full whitespace-nowrap" style={{ background: T.rustSolid, color: "#fff" }}>
                         Vượt ngân sách
                       </span>
                     )}
@@ -2777,7 +2793,7 @@ function EntryTab({
           {["expense", "income"].map((t) => (
             <button type="button" key={t} onClick={() => { setForm((f) => ({ ...f, type: t, category: "", subcategory: "", paymentMethod: t === "income" && f.paymentMethod === "credit" ? "bank" : f.paymentMethod })); setAddingNewCategory(false); setAddingNewSub(false); }}
               className="flex-1 py-2 font-medium transition-colors"
-              style={form.type === t ? { background: t === "income" ? T.green : T.rust, color: "#fff" } : { background: "#fff", color: T.muted }}>
+              style={form.type === t ? { background: t === "income" ? T.greenSolid : T.rustSolid, color: "#fff" } : { background: T.card, color: T.muted }}>
               {t === "income" ? "Thu nhập" : "Chi tiêu"}
             </button>
           ))}
@@ -2798,7 +2814,7 @@ function EntryTab({
               return (
                 <button type="button" key={opt.key} onClick={() => setForm((f) => ({ ...f, paymentMethod: opt.key }))}
                   className="flex-1 py-2.5 text-[11px] font-semibold transition-colors flex items-center justify-center gap-1 whitespace-nowrap"
-                  style={active ? { background: T.ink, color: "#fff" } : { background: "#fff", color: T.muted }}>
+                  style={active ? { background: T.inkSolid, color: "#fff" } : { background: T.card, color: T.muted }}>
                   <Icon size={12} className="shrink-0" /> {opt.label}
                 </button>
               );
@@ -2823,7 +2839,7 @@ function EntryTab({
               <input autoFocus value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)}
                 placeholder="Ví dụ: Cho thuê nhà" className="flex-1 rounded-lg border px-3 py-2 text-sm focus:outline-none" style={inputStyle}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmNewCategory(); } }} />
-              <button type="button" onClick={confirmNewCategory} className="rounded-lg px-2 text-white" style={{ background: T.green }}><Check size={16} /></button>
+              <button type="button" onClick={confirmNewCategory} className="rounded-lg px-2 text-white" style={{ background: T.greenSolid }}><Check size={16} /></button>
               <button type="button" onClick={() => { setAddingNewCategory(false); setNewCategoryName(""); }}
                 className="rounded-lg border px-2" style={{ borderColor: T.border, color: T.muted }}><X size={16} /></button>
             </div>
@@ -2851,7 +2867,7 @@ function EntryTab({
               <input autoFocus value={newSubName} onChange={(e) => setNewSubName(e.target.value)}
                 placeholder="Ví dụ: Mua giày" className="flex-1 rounded-lg border px-3 py-2 text-sm focus:outline-none" style={inputStyle}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmNewSub(); } }} />
-              <button type="button" onClick={confirmNewSub} className="rounded-lg px-2 text-white" style={{ background: T.green }}><Check size={16} /></button>
+              <button type="button" onClick={confirmNewSub} className="rounded-lg px-2 text-white" style={{ background: T.greenSolid }}><Check size={16} /></button>
               <button type="button" onClick={() => { setAddingNewSub(false); setNewSubName(""); }}
                 className="rounded-lg border px-2" style={{ borderColor: T.border, color: T.muted }}><X size={16} /></button>
             </div>
@@ -2894,7 +2910,7 @@ function EntryTab({
         </div>
 
         <div className="flex gap-2 pt-1">
-          <button type="submit" disabled={!canSubmit} className="flex-1 rounded-lg text-white text-sm font-medium py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed" style={{ background: T.ink }}>
+          <button type="submit" disabled={!canSubmit} className="flex-1 rounded-lg text-white text-sm font-medium py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed" style={{ background: T.inkSolid }}>
             <Check size={15} /> {editingId ? "Lưu thay đổi" : "Lưu khoản ghi"}
           </button>
           {editingId && (<button type="button" onClick={resetForm} className="rounded-lg border px-3 text-sm" style={{ borderColor: T.border, color: T.muted }}>Hủy</button>)}
@@ -3140,12 +3156,12 @@ function WalletTransferPanel({ walletBalances, onAddWalletTransfer, hideAmounts,
         <div className="flex rounded-lg overflow-hidden text-xs" style={{ border: `1px solid ${T.border}` }}>
           <button type="button" onClick={() => setDirection("bank_to_cash")}
             className="flex-1 py-2 font-medium transition-colors flex items-center justify-center gap-1"
-            style={direction === "bank_to_cash" ? { background: T.ink, color: "#fff" } : { background: "#fff", color: T.muted }}>
+            style={direction === "bank_to_cash" ? { background: T.inkSolid, color: "#fff" } : { background: T.card, color: T.muted }}>
             <Landmark size={12} /> → <Banknote size={12} /> Rút tiền mặt
           </button>
           <button type="button" onClick={() => setDirection("cash_to_bank")}
             className="flex-1 py-2 font-medium transition-colors flex items-center justify-center gap-1"
-            style={direction === "cash_to_bank" ? { background: T.ink, color: "#fff" } : { background: "#fff", color: T.muted }}>
+            style={direction === "cash_to_bank" ? { background: T.inkSolid, color: "#fff" } : { background: T.card, color: T.muted }}>
             <Banknote size={12} /> → <Landmark size={12} /> Nộp vào TK
           </button>
         </div>
@@ -3161,7 +3177,7 @@ function WalletTransferPanel({ walletBalances, onAddWalletTransfer, hideAmounts,
         )}
         <button type="submit" disabled={!canSubmit || submitting}
           className="w-full rounded-lg text-white text-sm font-medium py-2 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-          style={{ background: T.ink }}>
+          style={{ background: T.inkSolid }}>
           <ArrowLeftRight size={13} /> Xác nhận chuyển đổi
         </button>
       </form>
@@ -3447,7 +3463,7 @@ function AuthScreen({ initialMode = "login" }) {
             </div>
           )}
 
-          <button type="submit" disabled={submitting} className="w-full rounded-lg text-white text-sm font-medium py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-50" style={{ background: T.ink }}>
+          <button type="submit" disabled={submitting} className="w-full rounded-lg text-white text-sm font-medium py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-50" style={{ background: T.inkSolid }}>
             {submitting && <Loader2 size={14} className="animate-spin" />}
             {mode === "login" && "Đăng nhập"}
             {mode === "register" && "Đăng ký"}
