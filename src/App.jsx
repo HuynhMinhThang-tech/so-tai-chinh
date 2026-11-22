@@ -9,7 +9,7 @@ import {
   Plus, Pencil, Trash2, LayoutGrid, GitBranch, NotebookPen, X, Check,
   Monitor, Smartphone, Target, Eye, EyeOff, Banknote, Landmark, CreditCard, ArrowLeftRight, AlertTriangle, Search, Download, PlusCircle,
   LogOut, Mail, Lock, UserCircle2, Loader2, Sun, CloudSun, Moon,
-  Users, ShieldCheck, ShieldOff, MailCheck,
+  Users, ShieldCheck, ShieldOff, MailCheck, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 
 // ---------- Theme: DÙNG CHUNG bảng màu & font với app "Nhật Ký Giao Dịch" (kiểu Claude) ----------
@@ -17,32 +17,70 @@ import {
 // trong cùng bộ sản phẩm trông đồng nhất. Tên key object giữ nguyên để không phải sửa hàng trăm
 // chỗ tham chiếu T.xxx trong file, chỉ đổi Ý NGHĨA/giá trị của vài key cho khớp vai trò mới:
 // "sage" từ "hạn mức ngân sách" chuyển thành accent thương hiệu dùng chung (nav đang chọn, link,
-// thẻ tín dụng); "olive" vẫn là "trung tính/cảnh báo" nhưng đổi sắc cho khớp tông ấm mới.)
+// thẻ tín dụng); "olive" vẫn là "trung tính/cảnh báo" nhưng đổi sắc cho khớp tông ấm mới.
+//
+// QUAN TRỌNG — hỗ trợ Giao diện Sáng/Tối: mọi value bên dưới là CSS custom property
+// ("var(--stc-xxx)"), KHÔNG phải hex thẳng. Giá trị hex thật được định nghĩa 2 lần trong khối
+// <style> của FontImport (1 lần cho :root = sáng, 1 lần cho :root.dark = tối). Nhờ vậy ~300 chỗ
+// `style={{color: T.ink}}` rải khắp file tự đổi màu ngay khi class "dark" đổi trên thẻ <html>,
+// không cần sửa từng chỗ, không cần re-render — đúng cơ chế app "Nhật Ký Giao Dịch" đang dùng.)
 const T = {
-  page: "#FAF9F5",
-  card: "#FFFFFF",
-  ink: "#1C1B18",
-  muted: "#6B6963",
-  border: "#E7E5E0",
-  green: "#15803D",     // thu nhập / số dương (= --pnl-win của app Nhật Ký Giao Dịch)
-  greenSoft: "#E7F3EC",
-  sage: "#C96442",       // accent thương hiệu dùng chung (= --accent của app Nhật Ký Giao Dịch)
-  sageSoft: "#F6E7E1",
-  olive: "#B45309",      // tiền mặt / cảnh báo trung tính (sắc hổ phách ấm)
-  oliveSoft: "#FBF0DE",
-  rust: "#B91C1C",       // chi tiêu / vượt hạn mức / số âm (= --pnl-loss của app Nhật Ký Giao Dịch)
-  rustSoft: "#FBEAEA",
+  page: "var(--stc-page)",
+  card: "var(--stc-card)",
+  ink: "var(--stc-ink)",
+  muted: "var(--stc-muted)",
+  border: "var(--stc-border)",
+  green: "var(--stc-green)",     // thu nhập / số dương (= --pnl-win của app Nhật Ký Giao Dịch)
+  greenSoft: "var(--stc-green-soft)",
+  sage: "var(--stc-sage)",       // accent thương hiệu dùng chung (= --accent của app Nhật Ký Giao Dịch)
+  sageSoft: "var(--stc-sage-soft)",
+  olive: "var(--stc-olive)",     // tiền mặt / cảnh báo trung tính (sắc hổ phách ấm)
+  oliveSoft: "var(--stc-olive-soft)",
+  rust: "var(--stc-rust)",       // chi tiêu / vượt hạn mức / số âm (= --pnl-loss của app Nhật Ký Giao Dịch)
+  rustSoft: "var(--stc-rust-soft)",
 };
-const CHART_COLORS = ["#15803D", "#B45309", "#B91C1C", "#C96442", "#4D7C5F", "#C9A227", "#8A5A44"];
+// Bảng hex THẬT theo từng theme, dùng riêng cho biểu đồ recharts (xem comment ở CHART_HEX bên
+// dưới, gần OverviewTab/BudgetTab) — recharts đọc fill/stroke như SVG attribute thuần, nên KHÔNG
+// dùng var() ở đó (an toàn hơn, giống cách app "Nhật Ký Giao Dịch" cũng làm vậy cho biểu đồ).
+const CHART_COLORS_BY_THEME = {
+  light: ["#15803D", "#B45309", "#B91C1C", "#C96442", "#4D7C5F", "#C9A227", "#8A5A44"],
+  dark: ["#34E3A0", "#D99A4E", "#FF7A85", "#D97757", "#7FB68F", "#E0C25C", "#C08A6E"],
+};
+const CHART_COLORS = CHART_COLORS_BY_THEME.light; // dùng ở những nơi không theo theme (VD avatar admin)
+// Hex thật cho các màu đơn lẻ (lưới, trục, viền, tooltip, chữ...) mà recharts vẽ bên trong
+// OverviewTab (gồm cả WeekdaySpendingCard render bên trong nó) — nơi DUY NHẤT trong file render
+// biểu đồ. Lý do không dùng T.xxx (var()) ở đây: xem comment trên.
+const CHART_HEX = {
+  light: { ink: "#1C1B18", green: "#15803D", olive: "#B45309", rust: "#B91C1C", sage: "#C96442", border: "#E7E5E0", muted: "#6B6963" },
+  dark: { ink: "#F2EFE9", green: "#34E3A0", olive: "#D99A4E", rust: "#FF7A85", sage: "#D97757", border: "#32302B", muted: "#A6A39B" },
+};
 
 const FontImport = () => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+    :root {
+      --stc-page:#FAF9F5; --stc-card:#FFFFFF; --stc-ink:#1C1B18; --stc-muted:#6B6963;
+      --stc-border:#E7E5E0; --stc-green:#15803D; --stc-green-soft:#E7F3EC;
+      --stc-sage:#C96442; --stc-sage-soft:#F6E7E1; --stc-olive:#B45309; --stc-olive-soft:#FBF0DE;
+      --stc-rust:#B91C1C; --stc-rust-soft:#FBEAEA; --stc-evening:#3E4C6B;
+      --stc-sidebar-w: 256px;
+    }
+    :root.dark {
+      --stc-page:#181715; --stc-card:#22211E; --stc-ink:#F2EFE9; --stc-muted:#A6A39B;
+      --stc-border:#32302B; --stc-green:#34E3A0; --stc-green-soft:rgba(52,227,160,0.16);
+      --stc-sage:#D97757; --stc-sage-soft:rgba(217,119,87,0.16); --stc-olive:#D99A4E;
+      --stc-olive-soft:rgba(217,154,78,0.16); --stc-rust:#FF7A85; --stc-rust-soft:rgba(255,122,133,0.16);
+      --stc-evening:#8B9BD6;
+    }
     .ff-serif { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     .ff-sans { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     .ff-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     .rounded-2xl.bg-white { border: 1px solid ${T.border}; box-shadow: none; border-radius: 12px !important; }
     .rounded-xl { border-radius: 8px !important; }
+    /* Nền giờ sáng hơn (kem ấm thay vì ô-liu đậm) nên nhích đậm chữ lên 1 chút cho dễ đọc —
+       chỉ ảnh hưởng chữ KHÔNG có class font-weight riêng (font-medium/semibold/bold vẫn giữ
+       nguyên như cũ vì class trên chính thẻ luôn thắng giá trị kế thừa từ body). */
+    body { font-weight: 500; }
     /* ---- PWA trên iPhone: khi mở từ màn hình chính (standalone), chặn hiệu ứng
        cuộn nẩy (rubber-banding) làm lộ khoảng trắng phía sau, và chặn zoom 2 ngón tay ngoài ý muốn ---- */
     html, body {
@@ -273,10 +311,10 @@ function localISODate(dateLike = new Date()) {
 }
 const todayISO = () => localISODate(new Date());
 const currentMonth = () => todayISO().slice(0, 7);
-function colorFor(name, index) {
+function colorFor(name, index, palette = CHART_COLORS) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
-  return CHART_COLORS[Math.abs(h + (index || 0)) % CHART_COLORS.length];
+  return palette[Math.abs(h + (index || 0)) % palette.length];
 }
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -302,6 +340,10 @@ function weekdayOf(dateStr) {
 // ============================================================
 const SESSION_LOGIN_AT_KEY = "fin_app_login_at";
 const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 giờ
+const THEME_STORAGE_KEY = "fin_app_theme"; // "light" | "dark"
+const SIDEBAR_COLLAPSED_KEY = "fin_app_sidebar_collapsed"; // "1" | "0" — trạng thái thu gọn sidebar, riêng của Sidebar
+const SIDEBAR_W_EXPANDED = 256;
+const SIDEBAR_W_COLLAPSED = 72;
 
 // Quy tắc mật khẩu: tối thiểu 8 ký tự, có ít nhất 1 chữ hoa, 1 chữ số, 1 ký tự đặc biệt.
 const PASSWORD_RULE_REGEX = /^(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9\s]).{8,}$/;
@@ -312,9 +354,9 @@ function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((email |
 // "Good morning / afternoon / evening" — lấy trực tiếp giờ hệ thống của thiết bị đang mở app.
 function getGreetingPeriod(date = new Date()) {
   const h = date.getHours();
-  if (h >= 5 && h < 12) return { label: "Good morning", Icon: Sun, color: "#B8792C" };
-  if (h >= 12 && h < 18) return { label: "Good afternoon", Icon: CloudSun, color: "#2F6F5E" };
-  return { label: "Good evening", Icon: Moon, color: "#3E4C6B" };
+  if (h >= 5 && h < 12) return { label: "Good morning", Icon: Sun, color: T.olive };
+  if (h >= 12 && h < 18) return { label: "Good afternoon", Icon: CloudSun, color: T.green };
+  return { label: "Good evening", Icon: Moon, color: "var(--stc-evening)" };
 }
 function displayNameOf(session) {
   return session?.user?.user_metadata?.display_name || session?.user?.email || "bạn";
@@ -786,14 +828,21 @@ function FilterSelect({ label, value, onChange, options, placeholder, disabled, 
 // kỳ bộ lọc nào cũng sẽ tự quay về mức xem "theo thứ" ban đầu (reset phần đã khoan sâu).
 // Biểu đồ này CỐ Ý dùng bảng màu TRUNG TÍNH riêng (không dùng xanh lá "thu nhập" hay đỏ "chi
 // vượt"/cảnh báo của app) — tránh gây hiểu lầm rằng các cột ở đây mang ý nghĩa tốt/xấu.
-const NEUTRAL_BAR_COLORS = ["#2B2F27", "#454B3E", "#5F6656", "#7A8168", "#959B81", "#B1B6A0", "#CBCDBB"];
-function neutralColorFor(name, index) {
+const NEUTRAL_BAR_COLORS_BY_THEME = {
+  light: ["#2B2F27", "#454B3E", "#5F6656", "#7A8168", "#959B81", "#B1B6A0", "#CBCDBB"],
+  dark: ["#D8D5C9", "#BFBBA9", "#A6A08C", "#8D8870", "#746F57", "#5B5740", "#423F2C"],
+};
+const NEUTRAL_BAR_COLORS = NEUTRAL_BAR_COLORS_BY_THEME.light;
+function neutralColorFor(name, index, palette = NEUTRAL_BAR_COLORS) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
-  return NEUTRAL_BAR_COLORS[Math.abs(h + (index || 0)) % NEUTRAL_BAR_COLORS.length];
+  return palette[Math.abs(h + (index || 0)) % palette.length];
 }
-function WeekdaySpendingCard({ transactions, categories, month, hideAmounts, viewMode = "web" }) {
+function WeekdaySpendingCard({ transactions, categories, month, hideAmounts, viewMode = "web", theme = "light" }) {
   const mobile = viewMode === "app";
+  // Màu thật (không phải var()) cho các thuộc tính SVG của recharts — xem comment ở CHART_HEX.
+  const CT = CHART_HEX[theme] || CHART_HEX.light;
+  const NEUTRAL_CP = NEUTRAL_BAR_COLORS_BY_THEME[theme] || NEUTRAL_BAR_COLORS_BY_THEME.light;
   const chartUI = {
     axisFont: mobile ? 9 : 11,
     labelFont: mobile ? 9 : 11,
@@ -854,7 +903,7 @@ function WeekdaySpendingCard({ transactions, categories, month, hideAmounts, vie
       const totals = {};
       VN_WEEKDAY_ORDER.forEach((wd) => (totals[wd] = 0));
       baseFiltered.forEach((t) => { totals[weekdayOf(t.date)] += t.amount; });
-      return VN_WEEKDAY_ORDER.map((wd) => ({ key: wd, name: VN_WEEKDAY_LABELS[wd], value: totals[wd], color: T.ink }));
+      return VN_WEEKDAY_ORDER.map((wd) => ({ key: wd, name: VN_WEEKDAY_LABELS[wd], value: totals[wd], color: CT.ink }));
     }
     if (level === 1) {
       // Nếu chưa chọn Danh mục ở bộ lọc trên -> khoan theo danh mục; nếu đã chọn rồi (cố định
@@ -865,15 +914,15 @@ function WeekdaySpendingCard({ transactions, categories, month, hideAmounts, vie
         const key = groupByCategory ? t.category : (t.subcategory || "Khác");
         totals[key] = (totals[key] || 0) + t.amount;
       });
-      return Object.entries(totals).map(([name, value], i) => ({ name, value, color: neutralColorFor(name, i) })).sort((a, b) => b.value - a.value);
+      return Object.entries(totals).map(([name, value], i) => ({ name, value, color: neutralColorFor(name, i, NEUTRAL_CP) })).sort((a, b) => b.value - a.value);
     }
     const totals = {};
     (dayFiltered || []).filter((t) => t.category === drillCategory).forEach((t) => {
       const key = t.subcategory || "Khác";
       totals[key] = (totals[key] || 0) + t.amount;
     });
-    return Object.entries(totals).map(([name, value], i) => ({ name, value, color: neutralColorFor(name, i) })).sort((a, b) => b.value - a.value);
-  }, [level, baseFiltered, dayFiltered, filterCategory, drillCategory]);
+    return Object.entries(totals).map(([name, value], i) => ({ name, value, color: neutralColorFor(name, i, NEUTRAL_CP) })).sort((a, b) => b.value - a.value);
+  }, [level, baseFiltered, dayFiltered, filterCategory, drillCategory, theme]);
 
   const total = useMemo(() => chartData.reduce((s, d) => s + d.value, 0), [chartData]);
 
@@ -951,24 +1000,24 @@ function WeekdaySpendingCard({ transactions, categories, month, hideAmounts, vie
         <div style={{ width: "100%", height: chartUI.chartHeight }} className="mt-2">
           <ResponsiveContainer>
             <BarChart data={chartData} margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CT.border} />
               <XAxis
                 dataKey="name"
-                tick={{ fontSize: chartUI.axisFont, fill: T.muted }}
+                tick={{ fontSize: chartUI.axisFont, fill: CT.muted }}
                 interval={0}
                 angle={mobile ? -30 : 0}
                 textAnchor={mobile ? "end" : "middle"}
                 height={mobile ? 50 : 30}
               />
-              <YAxis width={44} tick={{ fontSize: chartUI.axisFont, fill: T.muted }} tickFormatter={(v) => mShort(v, hideAmounts)} />
-              <Tooltip cursor={{ fill: T.border, opacity: 0.45 }} formatter={(v) => [mfmt(v, hideAmounts), "Số tiền"]} />
+              <YAxis width={44} tick={{ fontSize: chartUI.axisFont, fill: CT.muted }} tickFormatter={(v) => mShort(v, hideAmounts)} />
+              <Tooltip cursor={{ fill: CT.border, opacity: 0.45 }} formatter={(v) => [mfmt(v, hideAmounts), "Số tiền"]} />
               <Bar
                 dataKey="value"
                 radius={[4, 4, 0, 0]}
                 onClick={handleBarClick}
                 cursor={canDrillFurther ? "pointer" : "default"}
               >
-                <LabelList dataKey="value" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: T.muted }} />
+                <LabelList dataKey="value" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: CT.muted }} />
                 {chartData.map((entry, i) => (<Cell key={i} fill={entry.color} />))}
               </Bar>
             </BarChart>
@@ -980,8 +1029,11 @@ function WeekdaySpendingCard({ transactions, categories, month, hideAmounts, vie
 }
 
 // ---------- Tab 1: Overview ----------
-function OverviewTab({ transactions, month, budgets, categories, hideAmounts, viewMode = "web", walletBalances, isActive = true, cumulativeUnallocated, carryOverBalance = 0, creditCardSettings, onUpsertCreditCardSettings }) {
+function OverviewTab({ transactions, month, budgets, categories, hideAmounts, viewMode = "web", walletBalances, isActive = true, cumulativeUnallocated, carryOverBalance = 0, creditCardSettings, onUpsertCreditCardSettings, theme = "light" }) {
   const mobile = viewMode === "app";
+  // Màu thật (không phải var()) cho các thuộc tính SVG của recharts — xem comment ở CHART_HEX.
+  const CT = CHART_HEX[theme] || CHART_HEX.light;
+  const CP = CHART_COLORS_BY_THEME[theme] || CHART_COLORS_BY_THEME.light;
   // Kích thước chữ / góc nghiêng trục biểu đồ co giãn theo giao diện đang xem: ở "app"
   // (màn hình hẹp) chữ cần nhỏ hơn và nhãn trục X cần nghiêng nhiều hơn để không bị chật/đè chữ.
   const chartUI = {
@@ -1033,14 +1085,14 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
     // "Chưa phân bổ" nữa — phần vượt đó được thể hiện riêng ở badge "Ngân sách vượt thu nhập".
     const denom = cumulativeUnallocated > 0 ? totalBudgeted + cumulativeUnallocated : totalBudgeted;
     const list = Object.entries(budgetedCats).map(([name, value], i) => ({
-      name, value, color: colorFor(name, i), pct: denom ? Math.round((value / denom) * 100) : 0,
+      name, value, color: colorFor(name, i, CP), pct: denom ? Math.round((value / denom) * 100) : 0,
     }));
     if (cumulativeUnallocated > 0) {
       list.push({ name: "Chưa phân bổ", value: cumulativeUnallocated, color: "#C9C4AE", pct: denom ? Math.round((cumulativeUnallocated / denom) * 100) : 0 });
     }
     list.sort((a, b) => b.value - a.value);
     return list;
-  }, [mb, cumulativeUnallocated]);
+  }, [mb, cumulativeUnallocated, CP]);
 
   // Xếp hạng danh mục chi tiêu — dạng PHÂN CẤP: cấp 1 là danh mục (tổng toàn bộ chi tiêu
   // của danh mục đó), bấm vào để mở rộng xem cấp 2 (từng chi tiết bên trong danh mục đó).
@@ -1228,12 +1280,12 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
                 height={chartUI.chartHeight}
                 margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
               >
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
-                <XAxis dataKey="day" tick={{ fontSize: chartUI.axisFont, fill: T.muted }} />
-                <YAxis width={44} tick={{ fontSize: chartUI.axisFont, fill: T.muted }} tickFormatter={(v) => mShort(v, hideAmounts)} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CT.border} />
+                <XAxis dataKey="day" tick={{ fontSize: chartUI.axisFont, fill: CT.muted }} />
+                <YAxis width={44} tick={{ fontSize: chartUI.axisFont, fill: CT.muted }} tickFormatter={(v) => mShort(v, hideAmounts)} />
                 <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
-                <Bar dataKey="thu" name="Thu nhập" fill={T.green} radius={[4, 4, 0, 0]} />
-                <Bar dataKey="chi" name="Chi tiêu" fill={T.olive} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="thu" name="Thu nhập" fill={CT.green} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="chi" name="Chi tiêu" fill={CT.olive} radius={[4, 4, 0, 0]} />
               </BarChart>
             </div>
           </>
@@ -1241,13 +1293,13 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
           <div style={{ width: "100%", height: chartUI.chartHeight }}>
             <ResponsiveContainer>
               <BarChart data={byDay} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
-                <XAxis dataKey="day" tick={{ fontSize: chartUI.axisFont, fill: T.muted }} />
-                <YAxis width={44} tick={{ fontSize: chartUI.axisFont, fill: T.muted }} tickFormatter={(v) => mShort(v, hideAmounts)} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CT.border} />
+                <XAxis dataKey="day" tick={{ fontSize: chartUI.axisFont, fill: CT.muted }} />
+                <YAxis width={44} tick={{ fontSize: chartUI.axisFont, fill: CT.muted }} tickFormatter={(v) => mShort(v, hideAmounts)} />
                 <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
-                <Legend wrapperStyle={{ fontSize: chartUI.legendFont, color: T.muted }} />
-                <Bar dataKey="thu" name="Thu nhập" fill={T.green} radius={[4, 4, 0, 0]} />
-                <Bar dataKey="chi" name="Chi tiêu" fill={T.olive} radius={[4, 4, 0, 0]} />
+                <Legend wrapperStyle={{ fontSize: chartUI.legendFont, color: CT.muted }} />
+                <Bar dataKey="thu" name="Thu nhập" fill={CT.green} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="chi" name="Chi tiêu" fill={CT.olive} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1297,7 +1349,7 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
                             <polyline
                               points={`${item.anchorX},${item.anchorY} ${bendX},${item.y} ${item.x},${item.y}`}
                               fill="none"
-                              stroke={T.border}
+                              stroke={CT.border}
                               strokeWidth={1}
                             />
                             <text
@@ -1306,7 +1358,7 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
                               textAnchor={isRight ? "start" : "end"}
                               dominantBaseline="central"
                               fontSize={chartUI.pctFont}
-                              fill={T.muted}
+                              fill={CT.muted}
                             >
                               {`${item.pct}%`}
                             </text>
@@ -1440,15 +1492,15 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
                 height={chartUI.chartHeight}
                 margin={{ top: 10, right: 8, left: 0, bottom: 0 }}
               >
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
-                <XAxis dataKey="name" tick={{ fontSize: chartUI.categoryAxisFont, fill: T.muted }} interval={0} angle={chartUI.xAngle} textAnchor="end" height={chartUI.xHeight} />
-                <YAxis width={44} domain={[0, budgetChartMax]} tick={{ fontSize: chartUI.axisFont, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CT.border} />
+                <XAxis dataKey="name" tick={{ fontSize: chartUI.categoryAxisFont, fill: CT.muted }} interval={0} angle={chartUI.xAngle} textAnchor="end" height={chartUI.xHeight} />
+                <YAxis width={44} domain={[0, budgetChartMax]} tick={{ fontSize: chartUI.axisFont, fill: CT.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
                 <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
-                <Bar dataKey="Hạn mức" fill={T.sage} radius={[4, 4, 0, 0]}>
-                  <LabelList dataKey="Hạn mức" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
+                <Bar dataKey="Hạn mức" fill={CT.sage} radius={[4, 4, 0, 0]}>
+                  <LabelList dataKey="Hạn mức" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: CT.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
                 </Bar>
-                <Bar dataKey="Đã chi" fill={T.rust} radius={[4, 4, 0, 0]}>
-                  <LabelList dataKey="Đã chi" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: T.rust, fontFamily: "'Inter', system-ui, sans-serif" }} />
+                <Bar dataKey="Đã chi" fill={CT.rust} radius={[4, 4, 0, 0]}>
+                  <LabelList dataKey="Đã chi" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: CT.rust, fontFamily: "'Inter', system-ui, sans-serif" }} />
                 </Bar>
               </BarChart>
             </div>
@@ -1457,16 +1509,16 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
           <div style={{ width: "100%", height: chartUI.chartHeight }}>
             <ResponsiveContainer>
               <BarChart data={budgetVsActual} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={T.border} />
-                <XAxis dataKey="name" tick={{ fontSize: chartUI.categoryAxisFont, fill: T.muted }} interval={0} angle={chartUI.xAngle} textAnchor="end" height={chartUI.xHeight} />
-                <YAxis width={44} domain={[0, budgetChartMax]} tick={{ fontSize: chartUI.axisFont, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CT.border} />
+                <XAxis dataKey="name" tick={{ fontSize: chartUI.categoryAxisFont, fill: CT.muted }} interval={0} angle={chartUI.xAngle} textAnchor="end" height={chartUI.xHeight} />
+                <YAxis width={44} domain={[0, budgetChartMax]} tick={{ fontSize: chartUI.axisFont, fill: CT.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
                 <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
-                <Legend wrapperStyle={{ fontSize: chartUI.legendFont, color: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
-                <Bar dataKey="Hạn mức" fill={T.sage} radius={[4, 4, 0, 0]}>
-                  <LabelList dataKey="Hạn mức" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: T.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
+                <Legend wrapperStyle={{ fontSize: chartUI.legendFont, color: CT.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
+                <Bar dataKey="Hạn mức" fill={CT.sage} radius={[4, 4, 0, 0]}>
+                  <LabelList dataKey="Hạn mức" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: CT.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
                 </Bar>
-                <Bar dataKey="Đã chi" fill={T.rust} radius={[4, 4, 0, 0]}>
-                  <LabelList dataKey="Đã chi" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: T.rust, fontFamily: "'Inter', system-ui, sans-serif" }} />
+                <Bar dataKey="Đã chi" fill={CT.rust} radius={[4, 4, 0, 0]}>
+                  <LabelList dataKey="Đã chi" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: CT.rust, fontFamily: "'Inter', system-ui, sans-serif" }} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -1474,7 +1526,7 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
         )}
       </div>
 
-      <WeekdaySpendingCard transactions={transactions} categories={categories} month={month} hideAmounts={hideAmounts} viewMode={mobile ? "app" : "web"} />
+      <WeekdaySpendingCard transactions={transactions} categories={categories} month={month} hideAmounts={hideAmounts} viewMode={mobile ? "app" : "web"} theme={theme} />
     </div>
   );
 }
@@ -3423,15 +3475,58 @@ function AuthScreen({ initialMode = "login" }) {
 }
 
 // ---------- Sidebar (web) — cùng khuôn với sidebar app "Việc Của Tôi" ----------
-function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMode, onViewChange, hideAmounts, onHideAmountsChange }) {
+function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMode, onViewChange, hideAmounts, onHideAmountsChange, theme, onToggleTheme }) {
+  // "Thu gọn" là trạng thái RIÊNG của Sidebar (giống cách a.zip làm) — không lift lên App, vì
+  // phần còn lại của app không cần biết, chỉ cần biết sidebar hiện rộng bao nhiêu để chừa chỗ.
+  // Kênh chia sẻ bề rộng đó là 1 CSS variable (--stc-sidebar-w) gắn lên <html>, y hệt cách "theme"
+  // dùng class "dark" — App chỉ cần đọc var() này, không cần prop/state thêm.
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1");
+  // useLayoutEffect (thay vì useEffect) để áp bề rộng TRƯỚC khi trình duyệt vẽ khung hình đầu
+  // tiên — tránh nháy 1 khung hình sai bề rộng khi tải lại trang lúc sidebar đang ở trạng thái thu gọn.
+  useLayoutEffect(() => {
+    document.documentElement.style.setProperty("--stc-sidebar-w", `${collapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W_EXPANDED}px`);
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  }, [collapsed]);
+
   return (
-    <aside style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 18 }}>
-      <div>
-        <div className="ff-serif" style={{ fontWeight: 700, fontSize: 22, color: T.ink }}>Sổ Tài Chính</div>
-        <div style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>Quản lý thu chi cá nhân</div>
+    <aside
+      style={{
+        position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 30,
+        width: collapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W_EXPANDED,
+        display: "flex", flexDirection: "column",
+        background: T.page, borderRight: `1px solid ${T.border}`,
+        transition: "width 160ms ease", overflow: "hidden",
+      }}
+    >
+      {/* Hàng đầu: logo + nút thu gọn/mở rộng */}
+      <div
+        style={{
+          height: 56, flexShrink: 0, display: "flex", alignItems: "center",
+          justifyContent: collapsed ? "center" : "space-between",
+          padding: collapsed ? 0 : "0 8px 0 14px", borderBottom: `1px solid ${T.border}`,
+        }}
+      >
+        {!collapsed && (
+          <div className="ff-serif" style={{ fontWeight: 700, fontSize: 16, color: T.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            Sổ Tài Chính
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          title={collapsed ? "Mở rộng" : "Thu gọn"}
+          style={{
+            border: "none", background: "transparent", cursor: "pointer", color: T.muted,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+          }}
+        >
+          {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+        </button>
       </div>
 
-      <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {/* Nav dạng pill, cuộn riêng nếu danh sách tab dài */}
+      <nav className="ff-sans" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 10, display: "flex", flexDirection: "column", gap: 3 }}>
         {tabs.map((t) => {
           const Icon = t.icon;
           const active = tab === t.id;
@@ -3439,29 +3534,53 @@ function Sidebar({ tab, setTab, tabs, txCountThisMonth, month, setMonth, viewMod
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className="ff-sans"
+              title={collapsed ? t.label : undefined}
               style={{
-                display: "flex", alignItems: "center", gap: 10, border: "none", cursor: "pointer",
-                textAlign: "left", padding: "10px 14px", borderRadius: "10px 10px 0 0",
+                display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+                textAlign: "left", padding: collapsed ? "9px 0" : "9px 12px",
+                justifyContent: collapsed ? "center" : "flex-start",
+                borderRadius: 10, border: `1px solid ${active ? T.border : "transparent"}`,
                 background: active ? T.card : "transparent", color: active ? T.ink : T.muted,
-                fontWeight: 600, fontSize: 13.5,
-                boxShadow: active ? "0 1px 2px rgba(32,38,31,0.08)" : "none",
+                fontWeight: active ? 700 : 600, fontSize: 13.5, whiteSpace: "nowrap", overflow: "hidden",
               }}
             >
-              <Icon size={16} strokeWidth={2.3} style={{ color: active ? T.sage : T.muted }} />
-              {t.label}
+              <Icon size={16} strokeWidth={2.3} style={{ color: active ? T.sage : T.muted, flexShrink: 0 }} />
+              {!collapsed && <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{t.label}</span>}
             </button>
           );
         })}
+
+        {!collapsed && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 11, color: T.muted, marginBottom: 6, fontWeight: 700 }}>BỘ LỌC &amp; GIAO DIỆN</div>
+            <MonthPicker value={month} onChange={setMonth} className="w-full" />
+            <div className="flex gap-1.5 mt-2">
+              {IS_DEV && <ViewToggle value={viewMode} onChange={onViewChange} />}
+              <AmountVisibilityToggle hidden={hideAmounts} onChange={onHideAmountsChange} full={!IS_DEV} />
+            </div>
+          </div>
+        )}
       </nav>
 
-      <div>
-        <div style={{ fontSize: 11, color: T.muted, marginBottom: 6, fontWeight: 600 }}>BỘ LỌC &amp; GIAO DIỆN</div>
-        <MonthPicker value={month} onChange={setMonth} className="w-full" />
-        <div className="flex gap-1.5 mt-2">
-          {IS_DEV && <ViewToggle value={viewMode} onChange={onViewChange} />}
-          <AmountVisibilityToggle hidden={hideAmounts} onChange={onHideAmountsChange} full={!IS_DEV} />
-        </div>
+      {/* Khối cuối: nút chuyển Giao diện Sáng/Tối */}
+      <div style={{ padding: 10, borderTop: `1px solid ${T.border}`, flexShrink: 0 }}>
+        <button
+          type="button"
+          onClick={onToggleTheme}
+          title={collapsed ? (theme === "dark" ? "Giao diện Sáng" : "Giao diện Tối") : undefined}
+          className="ff-sans"
+          style={{
+            width: "100%", display: "flex", alignItems: "center", gap: 10,
+            justifyContent: collapsed ? "center" : "flex-start",
+            padding: collapsed ? "9px 0" : "9px 12px", borderRadius: 10, border: `1px solid ${T.border}`,
+            background: T.card, color: T.ink, cursor: "pointer", fontSize: 13, fontWeight: 700,
+          }}
+        >
+          {theme === "dark"
+            ? <Sun size={16} style={{ color: T.sage, flexShrink: 0 }} />
+            : <Moon size={16} style={{ color: T.sage, flexShrink: 0 }} />}
+          {!collapsed && <span>{theme === "dark" ? "Giao diện Sáng" : "Giao diện Tối"}</span>}
+        </button>
       </div>
     </aside>
   );
@@ -3815,6 +3934,20 @@ export default function App() {
   const [tab, setTab] = useState("overview");
   const [viewMode, setViewMode] = useState(() => detectDevice());
   const [hideAmounts, setHideAmounts] = useState(false);
+
+  // ---------- Giao diện Sáng / Tối ----------
+  // Lưu ý: KHÔNG dùng React state để vẽ màu (xem object T bên dưới — T.xxx giờ là "var(--stc-xxx)"),
+  // mà chỉ dùng state này để gắn/gỡ class "dark" lên thẻ <html>. Trình duyệt tự đổi toàn bộ màu
+  // ngay khi class đổi, không cần re-render — đúng cơ chế app "Nhật Ký Giao Dịch" đang dùng.
+  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_STORAGE_KEY) || "light");
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", theme === "dark" ? "#181715" : "#C96442");
+  }, [theme]);
+  const toggleTheme = () => setTheme((p) => (p === "light" ? "dark" : "light"));
+
   const manualOverride = useRef(false);
 
   useEffect(() => {
@@ -4256,7 +4389,7 @@ export default function App() {
           ở tab "Tổng quan" bị khởi tạo lại từ đầu mỗi lần quay lại tab đó, có lúc lỡ nhịp đo và
           hiện bảng xếp hạng dài tràn lan cho tới khi tải lại cả trang mới hết. */}
       <div style={{ display: tab === "overview" ? "block" : "none" }}>
-        <OverviewTab transactions={transactions} month={month} budgets={budgets} categories={categories} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} isActive={tab === "overview"} cumulativeUnallocated={cumulativeUnallocated} carryOverBalance={carryOverBalance} creditCardSettings={creditCardSettings} onUpsertCreditCardSettings={upsertCreditCardSettings} />
+        <OverviewTab transactions={transactions} month={month} budgets={budgets} categories={categories} hideAmounts={hideAmounts} viewMode={viewMode === "app" ? "app" : "web"} walletBalances={walletBalances} isActive={tab === "overview"} cumulativeUnallocated={cumulativeUnallocated} carryOverBalance={carryOverBalance} creditCardSettings={creditCardSettings} onUpsertCreditCardSettings={upsertCreditCardSettings} theme={theme} />
       </div>
       <div style={{ display: tab === "flow" ? "block" : "none" }}>
         <CashFlowTab transactions={transactions} month={month} budgets={budgets} viewMode={viewMode === "app" ? "app" : "web"} hideAmounts={hideAmounts} cumulativeUnallocated={cumulativeUnallocated} carryOverBalance={carryOverBalance} />
@@ -4308,6 +4441,13 @@ export default function App() {
           </div>
           <div className="flex items-center gap-1.5">
             {IS_DEV && <IconViewToggle value={viewMode} onChange={handleViewChange} />}
+            <button
+              type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Giao diện Sáng" : "Giao diện Tối"}
+              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: T.card, border: `1px solid ${T.border}`, color: T.sage }}
+            >
+              {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
             <button
               type="button" onClick={handleLogout} aria-label="Đăng xuất"
               className="w-8 h-8 rounded-lg flex items-center justify-center"
@@ -4383,17 +4523,22 @@ export default function App() {
     );
   }
 
-  // ---------- Khung web: sidebar cố định, giống hệt app "Việc Của Tôi" ----------
+  // ---------- Khung web: sidebar CỐ ĐỊNH (fixed) full-bleed bên trái, đúng cấu trúc app "Nhật Ký
+  // Giao Dịch" — nội dung bên trong vẫn gói trong khối giữa trang (maxWidth 1280) để giữ cảm giác
+  // "dashboard gọn gàng" như trước, chỉ riêng khung sidebar/viền ngoài là tràn hết chiều ngang.
+  // "paddingLeft" chừa đúng bề rộng sidebar hiện tại qua CSS var --stc-sidebar-w (Sidebar tự set
+  // biến này — xem comment trong hàm Sidebar), nên không cần nâng state sidebarCollapsed lên đây.
   return (
-    <div className="ff-sans" style={{ minHeight: "100vh", background: T.page, display: "flex", justifyContent: "center", padding: "28px 20px" }}>
+    <div className="ff-sans" style={{ minHeight: "100dvh", background: T.page }}>
       <FontImport />
-      <div style={{ width: "100%", maxWidth: 1200, display: "flex", gap: 20 }}>
-        <Sidebar
-          tab={tab} setTab={setTab} tabs={tabs} txCountThisMonth={txCountThisMonth}
-          month={month} setMonth={setMonth} viewMode={viewMode} onViewChange={handleViewChange}
-          hideAmounts={hideAmounts} onHideAmountsChange={setHideAmounts}
-        />
-        <main style={{ flex: 1, minWidth: 0 }}>
+      <Sidebar
+        tab={tab} setTab={setTab} tabs={tabs} txCountThisMonth={txCountThisMonth}
+        month={month} setMonth={setMonth} viewMode={viewMode} onViewChange={handleViewChange}
+        hideAmounts={hideAmounts} onHideAmountsChange={setHideAmounts}
+        theme={theme} onToggleTheme={toggleTheme}
+      />
+      <div style={{ paddingLeft: "var(--stc-sidebar-w)", transition: "padding-left 160ms ease" }}>
+        <main style={{ maxWidth: 1280, margin: "0 auto", padding: "28px 20px" }}>
           <div className="flex items-center justify-between flex-wrap gap-3" style={{ margin: "4px 0 18px" }}>
             <h2 className="ff-serif" style={{ fontWeight: 600, fontSize: 24, color: T.ink, margin: 0 }}>{currentTabLabel}</h2>
             <div className="flex items-center gap-3">
