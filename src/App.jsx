@@ -1026,7 +1026,7 @@ function WeekdaySpendingCard({ transactions, categories, month, hideAmounts, vie
                 height={mobile ? 50 : 30}
               />
               <YAxis width={44} tick={{ fontSize: chartUI.axisFont, fill: CT.muted }} tickFormatter={(v) => mShort(v, hideAmounts)} />
-              <Tooltip cursor={{ fill: CT.border, opacity: 0.45 }} formatter={(v) => [mfmt(v, hideAmounts), "Số tiền"]} />
+              <Tooltip cursor={{ fill: CT.border, opacity: 0.45 }} formatter={(v) => [mfmt(v, hideAmounts), "Số tiền"]} contentStyle={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.ink }} itemStyle={{ color: T.ink }} labelStyle={{ color: T.muted }} />
               <Bar
                 dataKey="value"
                 radius={[4, 4, 0, 0]}
@@ -1299,7 +1299,7 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CT.border} />
                 <XAxis dataKey="day" tick={{ fontSize: chartUI.axisFont, fill: CT.muted }} />
                 <YAxis width={44} tick={{ fontSize: chartUI.axisFont, fill: CT.muted }} tickFormatter={(v) => mShort(v, hideAmounts)} />
-                <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
+                <Tooltip formatter={(v) => mfmt(v, hideAmounts)} contentStyle={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.ink }} itemStyle={{ color: T.ink }} labelStyle={{ color: T.muted }} />
                 <Bar dataKey="thu" name="Thu nhập" fill={CT.green} radius={[4, 4, 0, 0]} />
                 <Bar dataKey="chi" name="Chi tiêu" fill={CT.olive} radius={[4, 4, 0, 0]} />
               </BarChart>
@@ -1312,7 +1312,7 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CT.border} />
                 <XAxis dataKey="day" tick={{ fontSize: chartUI.axisFont, fill: CT.muted }} />
                 <YAxis width={44} tick={{ fontSize: chartUI.axisFont, fill: CT.muted }} tickFormatter={(v) => mShort(v, hideAmounts)} />
-                <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
+                <Tooltip formatter={(v) => mfmt(v, hideAmounts)} contentStyle={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.ink }} itemStyle={{ color: T.ink }} labelStyle={{ color: T.muted }} />
                 <Legend wrapperStyle={{ fontSize: chartUI.legendFont, color: CT.muted }} />
                 <Bar dataKey="thu" name="Thu nhập" fill={CT.green} radius={[4, 4, 0, 0]} />
                 <Bar dataKey="chi" name="Chi tiêu" fill={CT.olive} radius={[4, 4, 0, 0]} />
@@ -1387,6 +1387,9 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
                     </Pie>
                     <Tooltip
                       formatter={(value, name, props) => [`${mfmt(value, hideAmounts)} • ${props.payload.pct}%`, props.payload.name]}
+                      contentStyle={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.ink }}
+                      itemStyle={{ color: T.ink }}
+                      labelStyle={{ color: T.muted }}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -1511,7 +1514,7 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CT.border} />
                 <XAxis dataKey="name" tick={{ fontSize: chartUI.categoryAxisFont, fill: CT.muted }} interval={0} angle={chartUI.xAngle} textAnchor="end" height={chartUI.xHeight} />
                 <YAxis width={44} domain={[0, budgetChartMax]} tick={{ fontSize: chartUI.axisFont, fill: CT.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
-                <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
+                <Tooltip formatter={(v) => mfmt(v, hideAmounts)} contentStyle={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.ink }} itemStyle={{ color: T.ink }} labelStyle={{ color: T.muted }} />
                 <Bar dataKey="Hạn mức" fill={CT.sage} radius={[4, 4, 0, 0]}>
                   <LabelList dataKey="Hạn mức" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: CT.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
                 </Bar>
@@ -1528,7 +1531,7 @@ function OverviewTab({ transactions, month, budgets, categories, hideAmounts, vi
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CT.border} />
                 <XAxis dataKey="name" tick={{ fontSize: chartUI.categoryAxisFont, fill: CT.muted }} interval={0} angle={chartUI.xAngle} textAnchor="end" height={chartUI.xHeight} />
                 <YAxis width={44} domain={[0, budgetChartMax]} tick={{ fontSize: chartUI.axisFont, fill: CT.muted, fontFamily: "'Inter', system-ui, sans-serif" }} tickFormatter={(v) => mShort(v, hideAmounts)} />
-                <Tooltip formatter={(v) => mfmt(v, hideAmounts)} />
+                <Tooltip formatter={(v) => mfmt(v, hideAmounts)} contentStyle={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.ink }} itemStyle={{ color: T.ink }} labelStyle={{ color: T.muted }} />
                 <Legend wrapperStyle={{ fontSize: chartUI.legendFont, color: CT.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
                 <Bar dataKey="Hạn mức" fill={CT.sage} radius={[4, 4, 0, 0]}>
                   <LabelList dataKey="Hạn mức" position="top" formatter={(v) => mShort(v, hideAmounts)} style={{ fontSize: chartUI.labelFont, fill: CT.muted, fontFamily: "'Inter', system-ui, sans-serif" }} />
@@ -2964,7 +2967,7 @@ function EntryTab({
             )}
           </div>
           <div className={`flex gap-2 ${mobile ? "flex-col" : "items-center justify-between flex-wrap"}`}>
-            <div className={`inline-flex rounded-full p-0.5 gap-0.5 ${mobile ? "w-full" : ""}`} style={{ background: "#E4E7DC" }}>
+            <div className={`inline-flex rounded-full p-0.5 gap-0.5 ${mobile ? "w-full" : ""}`} style={{ background: T.border }}>
               {[
                 { key: "all", label: "Tất cả" },
                 { key: "income", label: "Thu nhập" },
@@ -2976,7 +2979,7 @@ function EntryTab({
                   className={`text-xs font-semibold px-2.5 py-1.5 rounded-full whitespace-nowrap ${mobile ? "flex-1" : ""}`}
                   style={{
                     border: "none", cursor: "pointer",
-                    background: logTypeFilter === opt.key ? T.ink : "transparent",
+                    background: logTypeFilter === opt.key ? T.inkSolid : "transparent",
                     color: logTypeFilter === opt.key ? "#fff" : T.muted,
                   }}
                 >
@@ -3758,7 +3761,7 @@ function UsersTab({ currentUserId, viewMode = "web" }) {
                 </button>
               )}
             </div>
-            <div className={`inline-flex rounded-full p-0.5 gap-0.5 ${mobile ? "w-full" : ""}`} style={{ background: "#E4E7DC" }}>
+            <div className={`inline-flex rounded-full p-0.5 gap-0.5 ${mobile ? "w-full" : ""}`} style={{ background: T.border }}>
               {[
                 { key: "all", label: "Tất cả" },
                 { key: "user", label: "User" },
@@ -3770,7 +3773,7 @@ function UsersTab({ currentUserId, viewMode = "web" }) {
                   className={`text-xs font-semibold px-2.5 py-1.5 rounded-full whitespace-nowrap ${mobile ? "flex-1" : ""}`}
                   style={{
                     border: "none", cursor: "pointer",
-                    background: roleFilter === opt.key ? T.ink : "transparent",
+                    background: roleFilter === opt.key ? T.inkSolid : "transparent",
                     color: roleFilter === opt.key ? "#fff" : T.muted,
                   }}
                 >
@@ -3802,7 +3805,7 @@ function UsersTab({ currentUserId, viewMode = "web" }) {
                 <div
                   key={u.id}
                   className="rounded-xl p-3.5 transition-colors"
-                  style={{ border: `1px solid ${T.border}`, background: "#fff" }}
+                  style={{ border: `1px solid ${T.border}`, background: T.card }}
                 >
                   <div className={`flex gap-3 ${mobile ? "flex-col" : "items-center justify-between"}`}>
                     <div className="flex items-start gap-3 min-w-0">
